@@ -663,7 +663,7 @@ fn convert_stmts<'py, 'a>(
         .collect::<PyResult<Vec<Stmt>>>()
 }
 
-fn convert_arg<'py, 'a>(
+fn convert_param<'py, 'a>(
     arg: Bound<'py, PyAny>,
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<Param> {
@@ -678,12 +678,12 @@ fn convert_arg<'py, 'a>(
     Ok(Param {id, ty, i})
 }
 
-fn convert_args<'py, 'a>(
+fn convert_params<'py, 'a>(
     body: &Bound<'py, PyAny>,
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<Vec<Param>> {
     body.getattr("args")?.getattr("args")?.try_iter()?
-        .map(|arg| convert_arg(arg?, env))
+        .map(|arg| convert_param(arg?, env))
         .collect::<PyResult<Vec<Param>>>()
 }
 
@@ -692,7 +692,7 @@ fn convert_fun_def<'py, 'a>(
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<FunDef> {
     let body = ast.getattr("body")?.get_item(0)?;
-    let params = convert_args(&body, env)?;
+    let params = convert_params(&body, env)?;
     let id = Name::new(body.getattr("name")?.extract::<String>()?);
     let ir_body = convert_stmts(body.getattr("body")?, &env)?;
     let i = merge_body_infos(&ir_body);
@@ -762,7 +762,7 @@ pub fn convert_external<'py>(
     };
     let body = ast.getattr("body")?.get_item(0)?;
     let i = extract_info(&body, &env);
-    let params = convert_args(&body, &env)?;
+    let params = convert_params(&body, &env)?;
     let id = Name::new(body.getattr("name")?.extract::<String>()?);
     assert_known_param_types(&params)?;
     let res_ty = convert_returns(body, &env, &i)?;
@@ -1836,7 +1836,7 @@ mod test {
         assert!(res.is_err());
     }
 
-    fn convert_arg_type_annot(annot: &str) -> PyResult<Type> {
+    fn convert_param_type_annot(annot: &str) -> PyResult<Type> {
         let s = format!("def f(x: {annot}):\n  return x");
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
@@ -1855,21 +1855,21 @@ mod test {
     fn try_extract_scalar_type_annot() -> PyResult<()> {
         for sz in ElemSize::iter() {
             let id = format!("parpy.types.{:?}", sz);
-            assert_eq!(convert_arg_type_annot(&id)?, scalar(sz));
+            assert_eq!(convert_param_type_annot(&id)?, scalar(sz));
         }
         Ok(())
     }
 
     #[test]
     fn try_extract_pointer_type_annot() {
-        let ty = convert_arg_type_annot("parpy.types.pointer(parpy.types.I8)").unwrap();
+        let ty = convert_param_type_annot("parpy.types.pointer(parpy.types.I8)").unwrap();
         assert_eq!(ty, Type::Pointer {sz: ElemSize::I8});
     }
 
     #[test]
     fn try_extract_int_type_annot() {
         assert_py_error_matches(
-            convert_arg_type_annot("int"),
+            convert_param_type_annot("int"),
             "Unsupported parameter type annotation"
         )
     }
