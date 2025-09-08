@@ -1070,7 +1070,7 @@ fn type_check_top(
 fn extract_param_types(id: &String, params: &Vec<Param>) -> (String, Vec<Type>) {
     let params = params.clone()
         .into_iter()
-        .map(|Param {ty, ..}| ty.clone())
+        .map(|Param {ty, ..}| ty)
         .collect::<Vec<Type>>();
     (id.clone(), params)
 }
