@@ -234,7 +234,6 @@ fn try_extract_type_annotation<'py, 'a>(
     let py = annot.py();
     let parpy = py.import("parpy")?;
     let parpy_tys = parpy.getattr("types")?;
-    let as_ptr_ty = |sz: Bound<'py, PyAny>| parpy_tys.call_method1("pointer", (sz,));
     match eval_node(&annot, &env, py) {
         Ok(ty) => {
             if ty.eq(parpy_tys.getattr("Bool")?)? {
@@ -261,30 +260,6 @@ fn try_extract_type_annotation<'py, 'a>(
                 Ok(Type::Tensor {shape: vec![], sz: ElemSize::F32})
             } else if ty.eq(parpy_tys.getattr("F64")?)? {
                 Ok(Type::Tensor {shape: vec![], sz: ElemSize::F64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("Bool")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::Bool})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I8")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I8})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U8")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U8})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F64})
             } else {
                 py_runtime_error!(i, "Unsupported parameter type annotation")
             }
@@ -1858,12 +1833,6 @@ mod test {
             assert_eq!(convert_param_type_annot(&id)?, scalar(sz));
         }
         Ok(())
-    }
-
-    #[test]
-    fn try_extract_pointer_type_annot() {
-        let ty = convert_param_type_annot("parpy.types.pointer(parpy.types.I8)").unwrap();
-        assert_eq!(ty, Type::Pointer {sz: ElemSize::I8});
     }
 
     #[test]
