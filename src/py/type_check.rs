@@ -2,7 +2,7 @@ use super::ast::*;
 use super::constant_fold;
 use super::slices;
 use crate::py_type_error;
-use crate::buffer::DataType;
+use crate::ext::buffer::DataType;
 use crate::utils::ast::{ExprType, ScalarSizes};
 use crate::utils::err::*;
 use crate::utils::info::*;

@@ -13,8 +13,5 @@ F16 = ElemSize.F16
 F32 = ElemSize.F32
 F64 = ElemSize.F64
 
-def pointer(ty):
-    if isinstance(ty, ElemSize):
-        return ExtType.Pointer(ty)
-    else:
-        raise RuntimeError(f"Provided type {ty} must be an ExtType.")
+def buffer(elem_ty, shape):
+    return ExtType.Buffer(elem_ty, shape)
