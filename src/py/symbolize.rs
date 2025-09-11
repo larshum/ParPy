@@ -5,9 +5,9 @@ use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::smap::SMapAccum;
 
-use std::collections::BTreeMap;
-
 use pyo3::prelude::*;
+use pyo3::types::PyCapsule;
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug)]
 pub struct SymbolizeEnv {
@@ -35,13 +35,13 @@ impl SymbolizeEnv {
     }
 
     pub fn set_symbol(mut self, id: Name) -> (Self, Name) {
-        if id.has_sym() {
-            (self, id)
+        let id = if id.has_sym() {
+            id
         } else {
-            let id = id.with_new_sym();
-            self.vars.insert(id.get_str().clone(), id.clone());
-            (self, id)
-        }
+            id.with_new_sym()
+        };
+        self.vars.insert(id.get_str().clone(), id.clone());
+        (self, id)
     }
 
     pub fn set_info(self, i: Info) -> Self {
@@ -57,11 +57,6 @@ impl Default for SymbolizeEnv {
 
 pub trait Symbolize {
     fn symbolize(self, env: SymbolizeEnv) -> SymbolizeResult<Self> where Self: Sized;
-
-    fn symbolize_default(self) -> PyResult<Self> where Self: Sized {
-        let (_, s) = self.symbolize(SymbolizeEnv::default())?;
-        Ok(s)
-    }
 }
 
 impl <'a, T: Symbolize + 'a> Symbolize for Vec<T> {
@@ -84,11 +79,16 @@ impl Symbolize for Expr {
                 let id = env.get_symbol(id)?;
                 Ok((env, Expr::Var {id, ty, i}))
             },
+            Expr::Call {id, args, ty, i} => {
+                let id = env.get_symbol(id)?;
+                let (env, args) = args.symbolize(env)?;
+                Ok((env, Expr::Call {id, args, ty, i}))
+            },
             Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
             Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-            Expr::Tuple {..} | Expr::Call {..} | Expr::NeutralElement {..} |
-            Expr::Builtin {..} | Expr::Convert {..} => {
+            Expr::Tuple {..} | Expr::NeutralElement {..} | Expr::Builtin {..} |
+            Expr::Convert {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }
@@ -127,8 +127,13 @@ impl Symbolize for Stmt {
                 let (_, body) = body.symbolize(body_env)?;
                 Ok((env, Stmt::For {var, lo, hi, step, body, labels, i}))
             },
+            Stmt::Call {func, args, i} => {
+                let func = env.get_symbol(func)?;
+                let (env, args) = args.symbolize(env)?;
+                Ok((env, Stmt::Call {func, args, i}))
+            },
             Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-            Stmt::WithGpuContext {..} | Stmt::Call {..} | Stmt::Label {..} => {
+            Stmt::WithGpuContext {..} | Stmt::Label {..} => {
                 let (env, s) = self.smap_accum_l_result(Ok(env), |env, e: Expr| e.symbolize(env))?;
                 s.smap_accum_l_result(Ok(env), |env, s: Stmt| s.symbolize(env))
             }
@@ -152,6 +157,26 @@ impl Symbolize for FunDef {
         let (env, body) = body.symbolize(env)?;
         Ok((env, FunDef {id, params, body, res_ty, i}))
     }
+}
+
+fn extract_top_name<'py>(t: Bound<'py, PyCapsule>) -> Name {
+    let t: &Top = unsafe { t.reference() };
+    match t {
+        Top::ExtDecl {id, ..} | Top::FunDef {v: FunDef {id, ..}} => id.clone()
+    }
+}
+
+pub fn with_tops<'py>(
+    tops: &BTreeMap<String, Bound<'py, PyCapsule>>,
+    def: FunDef
+) -> PyResult<FunDef> {
+    let vars = tops.clone()
+        .into_iter()
+        .map(|(id, cap)| (id, extract_top_name(cap)))
+        .collect::<BTreeMap<String, Name>>();
+    let env = SymbolizeEnv {vars, i: def.i.clone()};
+    let (_, def) = def.symbolize(env)?;
+    Ok(def)
 }
 
 #[cfg(test)]

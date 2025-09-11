@@ -16,7 +16,6 @@ mod type_check;
 #[cfg(test)]
 pub mod ast_builder;
 
-use symbolize::Symbolize;
 use crate::py_runtime_error;
 use crate::option::*;
 use crate::utils::ast::ScalarSizes;
@@ -38,7 +37,7 @@ pub fn parse_untyped_ast<'py>(
     vars: (Bound<'py, PyDict>, Bound<'py, PyDict>)
 ) -> PyResult<ast::FunDef> {
     let ast = from_py::to_untyped_ir(ast, info, tops, vars)?;
-    let ast = ast.symbolize_default()?;
+    let ast = symbolize::with_tops(tops, ast)?;
     labels::associate_labels(ast)
 }
 
