@@ -1,10 +1,8 @@
 pub mod ast;
 mod constant_fold;
 mod from_py;
-mod indices;
 mod inline_calls;
 mod inline_const;
-mod insert_called_functions;
 mod labels;
 mod par;
 mod pprint;
