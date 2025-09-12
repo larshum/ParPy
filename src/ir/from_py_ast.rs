@@ -55,9 +55,15 @@ fn to_ir_type(
         py_ast::Type::String => {
             parpy_compile_error!(i, "Encountered standalone string type when translating to IR AST")
         },
-        py_ast::Type::Tensor {sz, shape} => Ok(Type::Tensor {sz, shape}),
-        py_ast::Type::Pointer {sz} => {
-            Ok(Type::Pointer {ty: Box::new(Type::Tensor {sz, shape: vec![]})})
+        py_ast::Type::Tensor {sz, shape} => {
+            let shape = shape.into_iter()
+                .map(|sh| sh.extract_num())
+                .collect::<Option<Vec<i64>>>();
+            match shape {
+                Some(sh) => Ok(Type::Tensor {sz, shape: sh}),
+                None => parpy_compile_error!(i, "Encountered unresolved shape \
+                                                 symbol when translating to IR AST")
+            }
         },
         py_ast::Type::Tuple {..} => {
             parpy_compile_error!(i, "Encountered standalone tuple type when translating to IR AST")
@@ -251,6 +257,9 @@ fn to_ir_expr(
             let rhs = Box::new(to_ir_expr(env, *rhs)?);
             let ty = to_ir_type(env, &i, ty)?;
             Ok(Expr::BinOp {lhs, op, rhs, ty, i})
+        },
+        py_ast::Expr::ReduceOp {i, ..} => {
+            parpy_internal_error!(i, "Intermediate reduction node remaining during IR translation")
         },
         py_ast::Expr::IfExpr {cond, thn, els, ty, i} => {
             let cond = Box::new(to_ir_expr(env, *cond)?);

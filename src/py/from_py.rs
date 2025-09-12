@@ -472,7 +472,7 @@ fn construct_expr_stmt(
             Ok(Stmt::Label {label, i: i.clone()})
         },
         Expr::Call {id, args, ..} => {
-            Ok(Stmt::Call {func: id.to_string(), args, i: i.clone()})
+            Ok(Stmt::Call {func: id, args, i: i.clone()})
         },
         _ => py_runtime_error!(i, "Unsupported expression statement")
     }

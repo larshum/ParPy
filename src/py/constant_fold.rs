@@ -1,7 +1,7 @@
 use super::ast::*;
 use crate::utils::constant_fold::*;
 use crate::utils::info::Info;
-use crate::utils::smap::SMapAccum;
+use crate::utils::smap::*;
 
 impl CFExpr<Type> for Expr {
     fn mk_unop(op: UnOp, arg: Expr, ty: Type, i: Info) -> Expr {
@@ -69,7 +69,7 @@ impl CFType for Type {
     }
 }
 
-pub fn fold_expr(e: Expr) -> Expr {
+fn fold_expr(e: Expr) -> Expr {
     match e {
         Expr::UnOp {op, arg, ty, i} => {
             let arg = fold_expr(*arg);
@@ -95,6 +95,14 @@ pub fn fold_expr(e: Expr) -> Expr {
     }
 }
 
+fn fold_stmt(acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
+    s.smap(fold_expr).sflatten(acc, fold_stmt)
+}
+
+pub fn fold(body: Vec<Stmt>) -> Vec<Stmt> {
+    body.sflatten(vec![], fold_stmt)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -117,7 +125,7 @@ mod test {
     }
 
     fn vec_ty(sz: ElemSize) -> Type {
-        Type::Tensor {sz, shape: vec![10]}
+        Type::Tensor {sz, shape: vec![TensorShape::Num {n: 10}]}
     }
 
     #[test]

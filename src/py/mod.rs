@@ -6,10 +6,11 @@ mod inline_calls;
 mod inline_const;
 mod insert_called_functions;
 mod labels;
-mod no_return;
 mod par;
 mod pprint;
-mod slices;
+mod replace_builtins;
+mod slice_transformation;
+mod specialize;
 mod symbolize;
 mod type_check;
 
@@ -38,6 +39,7 @@ pub fn parse_untyped_ast<'py>(
 ) -> PyResult<ast::FunDef> {
     let ast = from_py::to_untyped_ir(ast, info, tops, vars)?;
     let ast = symbolize::with_tops(tops, ast)?;
+    let ast = replace_builtins::apply(ast)?;
     labels::associate_labels(ast)
 }
 
@@ -50,7 +52,7 @@ pub fn specialize_ast_on_arguments<'py>(
 ) -> PyResult<ast::Ast> {
     // We expect the top to contain a function definition, but it could also be an external
     // declaration, in which case we report an error.
-    let def = match t {
+    let main = match t {
         ast::Top::FunDef {v} => Ok(v),
         ast::Top::ExtDecl {id, ..} => {
             py_runtime_error!(
@@ -61,11 +63,9 @@ pub fn specialize_ast_on_arguments<'py>(
         }
     }?;
 
-    let par = &opts.parallelize;
-
     // Ensure the AST contains any degree of parallelism - otherwise, there is no point in using
     // this framework at all.
-    par::ensure_parallelism(&def, &par)?;
+    par::ensure_parallelism(&main, &opts.parallelize)?;
 
     // Perform the type-checking and inlining of literal values in an intertwined manner. First, we
     // type-check the parameters based on the corresponding arguments provided in the function
@@ -75,34 +75,18 @@ pub fn specialize_ast_on_arguments<'py>(
     // This particular order is important, because it allows us to reason about the exact sizes of
     // all slices and by extension the correctness of dimensions of slice operations.
     let scalar_sizes = ScalarSizes::from_opts(&opts);
-    let def = type_check::type_check_params(def, &args, &scalar_sizes)?;
-    let def = inline_const::inline_scalar_values(def, &args)?;
-    debug_env.print("Python-like AST after inlining", &def);
+    let main = inline_const::inline_scalar_values(main, &args)?;
+    debug_env.print("Python-like AST after inlining", &main);
 
-    let ast = insert_called_functions::apply(tops, def)?;
-
-    // As the types of slice operations involve tensors, we check that the shapes of all operations
-    // are valid, ignoring the element types inside tensors. Next, we resolve indices based on the
-    // inferred shapes, replacing negative and omitted indices with valid non-negative indices.
-    // After this, we perform the slice transformation, replacing slice statements with scalar
-    // operations. Finally, we can type-check the scalar operations of the resulting AST.
-    //
-    // Slice operations must be explicit, but they are allowed to perform broadcasting operations,
-    // unlike regular operations. When working with slices, the dimensions are explicitly declared,
-    // making it natural to specify parallelism, while regular broadcasting would make this
-    // implicit and therefore ill-suited with the parallelism approach used in this library.
-    let (_, ast) = type_check::check_body_shape(ast, &scalar_sizes)?;
-    debug_env.print("Python-like AST after shape checking", &ast);
-    let ast = indices::resolve_indices(ast)?;
-    debug_env.print("Python-like AST after resolving indices", &ast);
-    let ast = slices::replace_slices_with_for_loops(ast)?;
-    debug_env.print("Python-like AST after slice transformation", &ast);
-    let (_, ast) = type_check::type_check_body(ast, &scalar_sizes)?;
+    // Applies the type-checker, which resolves shape sizes and monomorphizes functions based on
+    // the provided arguments. The result is an AST containing all monomorphized versions of
+    // top-level definitions.
+    let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
     debug_env.print("Python-like AST after type-checking", &ast);
 
-    // Ensure that the main function contains return statements, as we cannot return values from
-    // within a kernel or within the entry point function.
-    no_return::check_no_return_in_main_function(&ast)?;
+    // Transform slice statements into for-loops.
+    let ast = slice_transformation::apply(ast)?;
+    debug_env.print("Python-like AST after slice transformation", &ast);
 
     Ok(ast)
 }
@@ -125,5 +109,12 @@ macro_rules! py_name_error {
 macro_rules! py_type_error {
     ($i:expr,$($t:tt)*) => {
         Err(Into::<PyErr>::into(CompileError::type_err($i.error_msg(format!($($t)*)))))
+    }
+}
+
+#[macro_export]
+macro_rules! py_internal_error {
+    ($i:expr,$($t:tt)*) => {
+        Err(Into::<PyErr>::into(CompileError::internal_err($i.error_msg(format!($($t)*)))))
     }
 }

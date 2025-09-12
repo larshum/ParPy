@@ -10,15 +10,14 @@ pub fn tyuk() -> Type {
 }
 
 pub fn shape(v: Vec<i64>) -> Type {
-    Type::Tensor {sz: ElemSize::I64, shape: v}
+    let shape = v.into_iter()
+        .map(|n| TensorShape::Num {n})
+        .collect::<Vec<TensorShape>>();
+    Type::Tensor {sz: ElemSize::I64, shape}
 }
 
 pub fn scalar(sz: ElemSize) -> Type {
     Type::Tensor {sz, shape: vec![]}
-}
-
-pub fn pointer(sz: ElemSize) -> Type {
-    Type::Pointer {sz}
 }
 
 pub fn dict_ty(fields: Vec<(&str, Type)>) -> Type {

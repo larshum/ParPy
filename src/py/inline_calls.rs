@@ -40,9 +40,9 @@ fn substitute_variables_expr(e: Expr, sub_map: &BTreeMap<Name, Expr>) -> Expr {
         },
         Expr::Var {..} | Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
         Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-        Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-        Expr::Tuple {..} | Expr::Call {..} | Expr::NeutralElement {..} |
-        Expr::Builtin {..} | Expr::Convert {..} => {
+        Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
+        Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
+        Expr::NeutralElement {..} | Expr::Builtin {..} | Expr::Convert {..} => {
             e.smap(|e| substitute_variables_expr(e, sub_map))
         }
     }
@@ -60,7 +60,7 @@ fn inline_function_calls_stmt<'py>(
 ) -> PyResult<Vec<Stmt>> {
     match stmt {
         Stmt::Call {func, args, i} => {
-            if let Some(ast_ref) = tops.get(&func) {
+            if let Some(ast_ref) = tops.get(func.get_str()) {
                 let t: Top = unsafe { ast_ref.reference::<Top>() }.clone();
                 match t {
                     Top::FunDef {v: fun} => {

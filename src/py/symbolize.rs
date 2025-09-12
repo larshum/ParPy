@@ -86,9 +86,9 @@ impl Symbolize for Expr {
             },
             Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-            Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-            Expr::Tuple {..} | Expr::NeutralElement {..} | Expr::Builtin {..} |
-            Expr::Convert {..} => {
+            Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
+            Expr::Slice {..} | Expr::Tuple {..} | Expr::NeutralElement {..} |
+            Expr::Builtin {..} | Expr::Convert {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }
@@ -240,7 +240,9 @@ mod test {
 
     #[test]
     fn symbolize_unknown_var_fail() {
-        assert_py_error_matches(var("x", Type::Unknown).symbolize_default(), "unknown variable");
+        let e = var("x", Type::Unknown);
+        let env = sym_env(vec![]);
+        assert_py_error_matches(e.symbolize(env), "unknown variable");
     }
 
     #[test]
