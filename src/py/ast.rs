@@ -137,14 +137,14 @@ pub enum Expr {
     Float {v: f64, ty: Type, i: Info},
     UnOp {op: UnOp, arg: Box<Expr>, ty: Type, i: Info},
     BinOp {lhs: Box<Expr>, op: BinOp, rhs: Box<Expr>, ty: Type, i: Info},
-    ReduceOp {op: ReduceOp, arg: Box<Expr>, axis: Option<i64>, ty: Type, i: Info},
+    ReduceOp {op: ReduceOp, arg: Box<Expr>, ty: Type, i: Info},
     IfExpr {cond: Box<Expr>, thn: Box<Expr>, els: Box<Expr>, ty: Type, i: Info},
     Subscript {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Slice {lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, ty: Type, i: Info},
     Tuple {elems: Vec<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
     NeutralElement {op: BinOp, tyof: Box<Expr>, i: Info},
-    Builtin {func: Builtin, args: Vec<Expr>, axis: Option<i64>, ty: Type, i: Info},
+    Builtin {func: Builtin, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type},
 }
 
@@ -179,14 +179,14 @@ impl Expr {
             Expr::Float {v, ty, ..} => Expr::Float {v, ty, i},
             Expr::UnOp {op, arg, ty, ..} => Expr::UnOp {op, arg, ty, i},
             Expr::BinOp {lhs, op, rhs, ty, ..} => Expr::BinOp {lhs, op, rhs, ty, i},
-            Expr::ReduceOp {op, arg, axis, ty, ..} => Expr::ReduceOp {op, arg, axis, ty, i},
+            Expr::ReduceOp {op, arg, ty, ..} => Expr::ReduceOp {op, arg, ty, i},
             Expr::IfExpr {cond, thn, els, ty, ..} => Expr::IfExpr {cond, thn, els, ty, i},
             Expr::Subscript {target, idx, ty, ..} => Expr::Subscript {target, idx, ty, i},
             Expr::Slice {lo, hi, ty, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, ty, ..} => Expr::Tuple {elems, ty, i},
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
             Expr::NeutralElement {op, tyof, ..} => Expr::NeutralElement {op, tyof, i},
-            Expr::Builtin {func, args, axis, ty, ..} => Expr::Builtin {func, args, axis, ty, i},
+            Expr::Builtin {func, args, ty, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
         }
     }
@@ -200,7 +200,7 @@ impl Expr {
             Expr::Float {v, i, ..} => Expr::Float {v, ty, i},
             Expr::UnOp {op, arg, i, ..} => Expr::UnOp {op, arg, ty, i},
             Expr::BinOp {lhs, op, rhs, i, ..} => Expr::BinOp {lhs, op, rhs, ty, i},
-            Expr::ReduceOp {op, arg, axis, i, ..} => Expr::ReduceOp {op, arg, axis, ty, i},
+            Expr::ReduceOp {op, arg, i, ..} => Expr::ReduceOp {op, arg, ty, i},
             Expr::IfExpr {cond, thn, els, i, ..} => Expr::IfExpr {cond, thn, els, ty, i},
             Expr::Subscript {target, idx, i, ..} => Expr::Subscript {target, idx, ty, i},
             Expr::Slice {lo, hi, i, ..} => Expr::Slice {lo, hi, ty, i},
@@ -209,7 +209,7 @@ impl Expr {
             Expr::NeutralElement {op, tyof, i} => {
                 Expr::NeutralElement {op, tyof: Box::new(tyof.with_type(ty)), i}
             },
-            Expr::Builtin {func, args, axis, i, ..} => Expr::Builtin {func, args, axis, ty, i},
+            Expr::Builtin {func, args, i, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ..} => Expr::Convert {e, ty},
         }
     }
@@ -351,9 +351,9 @@ impl SMapAccum<Expr> for Expr {
                     lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i
                 }))
             },
-            Expr::ReduceOp {op, arg, axis, ty, i} => {
+            Expr::ReduceOp {op, arg, ty, i} => {
                 let (acc, arg) = f(acc?, *arg)?;
-                Ok((acc, Expr::ReduceOp {op, arg: Box::new(arg), axis, ty, i}))
+                Ok((acc, Expr::ReduceOp {op, arg: Box::new(arg), ty, i}))
             },
             Expr::IfExpr {cond, thn, els, ty, i} => {
                 let (acc, cond) = f(acc?, *cond)?;
@@ -383,9 +383,9 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, ty, i}))
             },
-            Expr::Builtin {func, args, axis, ty, i} => {
+            Expr::Builtin {func, args, ty, i} => {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Expr::Builtin {func, args, axis, ty, i}))
+                Ok((acc, Expr::Builtin {func, args, ty, i}))
             },
             Expr::NeutralElement {op, tyof, i} => {
                 let (acc, tyof) = f(acc?, *tyof)?;

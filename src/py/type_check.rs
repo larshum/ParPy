@@ -656,12 +656,12 @@ impl TypeCheck for Expr {
                 let (lhs, ty, rhs) = type_check_binop(lhs, &op, rhs, &i)?;
                 Ok((env, Expr::BinOp {lhs, op, rhs, ty, i}))
             },
-            Expr::ReduceOp {op, arg, axis, ty: _, i} => {
+            Expr::ReduceOp {op, arg, ty: _, i} => {
                 let (env, arg) = arg.type_check(env)?;
                 let arg_ty = arg.get_type();
                 if arg_ty.is_int_scalar() || arg_ty.is_float_scalar() {
                     let ty = arg_ty.clone();
-                    Ok((env, Expr::ReduceOp {op, arg: Box::new(arg), axis, ty, i}))
+                    Ok((env, Expr::ReduceOp {op, arg: Box::new(arg), ty, i}))
                 } else {
                     py_type_error!(i, "Reduction operations are only supported \
                                        on integer and float types.")

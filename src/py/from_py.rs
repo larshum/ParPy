@@ -223,7 +223,7 @@ fn lookup_builtin_expr<'py, 'a>(
     i: &Info
 ) -> PyResult<Expr> {
     let func = lookup_builtin(expr, env, &i)?;
-    Ok(Expr::Builtin {func, args: vec![], axis: None, ty: Type::Unknown, i: i.clone()})
+    Ok(Expr::Builtin {func, args: vec![], ty: Type::Unknown, i: i.clone()})
 }
 
 fn try_extract_type_annotation<'py, 'a>(
@@ -279,28 +279,11 @@ fn extract_integer_literal_value(e: Expr) -> Option<i64> {
     }
 }
 
-/// Currently, the only supported keyword argument is the 'axis' keyword, used to determine which
-/// axis should be reduced in the supported reduction builtins. If any other keyword arguments are
-/// provided, we report an error.
-fn extract_axis_kwarg<'py, 'a>(
-    acc: PyResult<Option<i64>>,
-    kw: Bound<'py, PyAny>,
-    i: &Info,
-    env: &ConvertEnv<'py, 'a>
-) -> PyResult<Option<i64>> {
-    let kw_str = kw.getattr("arg")?.extract::<String>()?;
-    match acc? {
-        None if kw_str == "axis" => {
-            let kw_val = kw.getattr("value")?;
-            match extract_integer_literal_value(convert_expr(kw_val, env)?) {
-                Some(v) => Ok(Some(v)),
-                None => py_runtime_error!(i, "Expected integer literal value \
-                                              for 'axis' keyword argument")
-            }
-        },
-        None | Some(_) => {
-            py_runtime_error!(i, "Unsupported keyword argument in call: {kw_str}")
-        }
+fn ensure_no_keyword_arguments<'py>(e: &Bound<'py, PyAny>, i: &Info) -> PyResult<()> {
+    if e.getattr("keywords")?.try_iter()?.count() > 0 {
+        py_runtime_error!(i, "Keyword arguments are not supported in call nodes")
+    } else {
+        Ok(())
     }
 }
 
@@ -405,23 +388,17 @@ fn convert_expr<'py, 'a>(
             .try_iter()?
             .map(|arg| convert_expr(arg?, env))
             .collect::<PyResult<Vec<Expr>>>()?;
-        let axis = expr.getattr("keywords")?
-            .try_iter()?
-            .fold(Ok(None), |acc, kw| extract_axis_kwarg(acc, kw?, &i, env))?;
+        ensure_no_keyword_arguments(&expr, &i)?;
         match convert_expr(expr.getattr("func")?, env)? {
             Expr::Var {id, ..} => {
                 if env.tops.contains_key(&id.to_string()) {
-                    if axis.is_none() {
-                        Ok(Expr::Call {id, args, ty, i})
-                    } else {
-                        py_runtime_error!(i, "Unsupported keyword argument in call: axis")
-                    }
+                    Ok(Expr::Call {id, args, ty, i})
                 } else {
                     py_runtime_error!(i, "Call to unknown function {0}", id.to_string())
                 }
             },
             Expr::Builtin {func, args: a, ..} if a.len() == 0 => {
-                Ok(Expr::Builtin {func, args, axis, ty, i})
+                Ok(Expr::Builtin {func, args, ty, i})
             },
             _ => py_runtime_error!(i, "Unsupported call target type")
         }
@@ -1386,14 +1363,13 @@ mod test {
                 ty: Type::Unknown,
                 i: mkinfo(1, 14, 1, 17)
             }],
-            axis: None,
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 18)
         });
     }
 
     #[test]
-    fn convert_expr_sum_no_axis() {
+    fn convert_expr_sum() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:])").unwrap();
         assert_eq!(e, Expr::Builtin {
             func: Builtin::Sum,
@@ -1409,48 +1385,21 @@ mod test {
                 ty: Type::Unknown,
                 i: mkinfo(1, 12, 1, 17)
             }],
-            axis: None,
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 17)
         });
     }
 
     #[test]
-    fn convert_expr_sum_axis() {
-        let e = convert_expr_wrap("parpy.operators.sum(x[:,:], axis=1)").unwrap();
-        assert_eq!(e, Expr::Builtin {
-            func: Builtin::Sum,
-            args: vec![Expr::Subscript {
-                target: Box::new(Expr::Var {
-                    id: id("x"),
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 12, 1, 13)
-                }),
-                idx: Box::new(Expr::Tuple {
-                    elems: vec![
-                        Expr::Slice {
-                            lo: None, hi: None, ty: Type::Unknown, i: mkinfo(1, 14, 1, 15)
-                        },
-                        Expr::Slice {
-                            lo: None, hi: None, ty: Type::Unknown, i: mkinfo(1, 16, 1, 17)
-                        }
-                    ],
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 14, 1, 17)
-                }),
-                ty: Type::Unknown,
-                i: mkinfo(1, 12, 1, 18)
-            }],
-            axis: Some(1),
-            ty: Type::Unknown,
-            i: mkinfo(1, 0, 1, 27)
-        });
+    fn convert_expr_sum_kwarg() {
+        let e = convert_expr_wrap("parpy.operators.sum(x[:,:], axis=1)");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
     fn convert_expr_sum_invalid_axis_form() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:], axis='x')");
-        assert_py_error_matches(e, r"Expected integer literal value.*");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
@@ -1495,13 +1444,13 @@ mod test {
     #[test]
     fn convert_expr_call_keyword_args() {
         let e = convert_expr_wrap_helper("f(2, y=3)", vec!["f".to_string()]);
-        assert_py_error_matches(e, r"Unsupported keyword argument in call.*y");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
     fn convert_expr_call_axis_keyword_arg() {
         let e = convert_expr_wrap_helper("f(2, axis=3)", vec!["f".to_string()]);
-        assert_py_error_matches(e, r"Unsupported keyword argument in call.*axis");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     fn convert_stmt_wrap(s: &str) -> PyResult<Stmt> {
