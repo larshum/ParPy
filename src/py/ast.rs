@@ -143,7 +143,7 @@ pub enum Expr {
     Slice {lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, ty: Type, i: Info},
     Tuple {elems: Vec<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
-    NeutralElement {op: BinOp, tyof: Box<Expr>, i: Info},
+    NeutralElement {op: BinOp, ty: Type, i: Info},
     Builtin {func: Builtin, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type},
 }
@@ -185,7 +185,7 @@ impl Expr {
             Expr::Slice {lo, hi, ty, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, ty, ..} => Expr::Tuple {elems, ty, i},
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
-            Expr::NeutralElement {op, tyof, ..} => Expr::NeutralElement {op, tyof, i},
+            Expr::NeutralElement {op, ty, ..} => Expr::NeutralElement {op, ty, i},
             Expr::Builtin {func, args, ty, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
         }
@@ -206,9 +206,7 @@ impl Expr {
             Expr::Slice {lo, hi, i, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, i, ..} => Expr::Tuple {elems, ty, i},
             Expr::Call {id, args, i, ..} => Expr::Call {id, args, ty, i},
-            Expr::NeutralElement {op, tyof, i} => {
-                Expr::NeutralElement {op, tyof: Box::new(tyof.with_type(ty)), i}
-            },
+            Expr::NeutralElement {op, i, ..} => Expr::NeutralElement {op, ty, i},
             Expr::Builtin {func, args, i, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ..} => Expr::Convert {e, ty},
         }
@@ -231,7 +229,7 @@ impl ExprType<Type> for Expr {
             Expr::Slice {ty, ..} => ty,
             Expr::Tuple {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
-            Expr::NeutralElement {tyof, ..} => tyof.get_type(),
+            Expr::NeutralElement {ty, ..} => ty,
             Expr::Builtin {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
         }
@@ -277,9 +275,8 @@ impl Ord for Expr {
                 lelems.cmp(relems),
             (Expr::Call {id: lid, args: largs, ..}, Expr::Call {id: rid, args: rargs, ..}) =>
                 lid.cmp(rid).then(largs.cmp(rargs)),
-            ( Expr::NeutralElement {op: lop, tyof: ltyof, ..}
-            , Expr::NeutralElement {op: rop, tyof: rtyof, ..} ) =>
-                lop.cmp(rop).then(ltyof.cmp(rtyof)),
+            ( Expr::NeutralElement {op: lop, ..}
+            , Expr::NeutralElement {op: rop, ..} ) => lop.cmp(rop),
             ( Expr::Builtin {func: lfunc, args: largs, ..}
             , Expr::Builtin {func: rfunc, args: rargs, ..} ) =>
                 lfunc.cmp(rfunc).then(largs.cmp(rargs)),
@@ -387,16 +384,12 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Builtin {func, args, ty, i}))
             },
-            Expr::NeutralElement {op, tyof, i} => {
-                let (acc, tyof) = f(acc?, *tyof)?;
-                Ok((acc, Expr::NeutralElement {op, tyof: Box::new(tyof), i}))
-            },
             Expr::Convert {e, ty} => {
                 let (acc, e) = f(acc?, *e)?;
                 Ok((acc, Expr::Convert {e: Box::new(e), ty}))
             },
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
-            Expr::Int {..} | Expr::Float {..} => {
+            Expr::Int {..} | Expr::Float {..} | Expr::NeutralElement {..} => {
                 Ok((acc?, self))
             },
         }
@@ -418,11 +411,10 @@ impl SFold<Expr> for Expr {
             Expr::Slice {lo, hi, ..} => hi.sfold_result(lo.sfold_result(acc, &f), &f),
             Expr::Tuple {elems, ..} => elems.sfold_result(acc, &f),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
-            Expr::NeutralElement {tyof, ..} => f(acc?, tyof),
             Expr::Builtin {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
-            Expr::Int {..} | Expr::Float {..} => acc
+            Expr::Int {..} | Expr::Float {..} | Expr::NeutralElement {..} => acc
         }
     }
 }

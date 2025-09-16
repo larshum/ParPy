@@ -784,7 +784,7 @@ mod test {
     #[test]
     fn neutral_element_expr_to_ir() {
         let ne = py_ast::Expr::NeutralElement {
-            op: BinOp::Add, tyof: Box::new(py::int(1, Some(ElemSize::I64))),
+            op: BinOp::Add, ty: py::scalar(ElemSize::I64),
             i: Info::default()
         };
         let r = to_ir_expr(&ir_env(), ne);

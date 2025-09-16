@@ -726,9 +726,8 @@ impl TypeCheck for Expr {
                     ty => Ok((env, Expr::Call {id: new_id, args, ty, i}))
                 }
             },
-            Expr::NeutralElement {op, tyof, i} => {
-                let (env, tyof) = tyof.type_check(env)?;
-                Ok((env, Expr::NeutralElement {op, tyof: Box::new(tyof), i}))
+            Expr::NeutralElement {op, ty, i} => {
+                Ok((env, Expr::NeutralElement {op, ty, i}))
             },
             Expr::Builtin {i, ..} => {
                 py_internal_error!(i, "Found builtin expression in type-checker.")
