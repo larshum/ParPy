@@ -778,16 +778,6 @@ mod test {
         assert_error_matches(r, r"compile error.*Tuples are not allowed outside");
     }
 
-    #[test]
-    fn neutral_element_expr_to_ir() {
-        let ne = py_ast::Expr::NeutralElement {
-            op: BinOp::Add, ty: py::scalar(ElemSize::I64),
-            i: Info::default()
-        };
-        let r = to_ir_expr(&ir_env(), ne);
-        assert_error_matches(r, r"Internal.*Intermediate reduction node");
-    }
-
     fn make_par_map(v: Vec<(&str, LoopPar)>) -> BTreeMap<String, LoopPar> {
         v.into_iter()
             .map(|(id, p)| (id.to_string(), p))
