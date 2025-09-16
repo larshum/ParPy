@@ -1,11 +1,14 @@
 use super::ast::*;
 use crate::py_internal_error;
 use crate::py_runtime_error;
+use crate::py_type_error;
 use crate::par;
 use crate::utils::ast::*;
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
+use crate::utils::pprint::PrettyPrint;
+use crate::utils::reduce;
 use crate::utils::smap::*;
 
 use itertools::Itertools;
@@ -264,8 +267,38 @@ fn derive_dims_from_reduce_id(
     substitute_variables(e, &sub_map)
 }
 
+enum ReduceTargetType {
+    Definition {e: Expr},
+    Assign {e: Expr},
+}
+
+impl ReduceTargetType {
+    fn get_expr<'a>(&'a self) -> &'a Expr {
+        match self {
+            ReduceTargetType::Definition {e} => e,
+            ReduceTargetType::Assign {e} => e,
+        }
+    }
+}
+
+fn find_neutral_element(op: &BinOp, ty: &Type, i: &Info) -> PyResult<Expr> {
+    match ty {
+        Type::Tensor {sz, shape} if shape.is_empty() => {
+            match reduce::neutral_element(&op, &sz, &i) {
+                Some(e) => Ok(e),
+                None => {
+                    let op = op.pprint_default();
+                    py_runtime_error!(i, "Failed to find neutral element for \
+                                          reduction operation {op}")
+                }
+            }
+        },
+        _ => py_type_error!(i, "Invalid type {ty} of reduction")
+    }
+}
+
 fn generate_reduction_loop(
-    lhs: Expr,
+    lhs: ReduceTargetType,
     rhs: Expr,
     mut labels: Vec<String>,
     i: Info,
@@ -294,26 +327,24 @@ fn generate_reduction_loop(
     // Extract the relevant values from the left- and right-hand side arguments of the reduction
     // operation. The exact form of a reduction is checked before this function is called, so we
     // report an internal error if these assumptions do not hold.
-    let (id, ty) = match lhs.clone() {
-        Expr::Var {id, ty, ..} => Ok((id, ty)),
-        _ => py_internal_error!(i, "Invalid form of reduction operation")
-    }?;
+    let lhs_expr = lhs.get_expr();
+    let ty = lhs.get_expr().get_type().clone();
     let (op, rhs) = match rhs {
         Expr::ReduceOp {op, arg, ..} => Ok((op.to_bin_op(), *arg)),
         _ => py_internal_error!(i, "Invalid form of reduction operation")
     }?;
 
-    let ne = Expr::NeutralElement {
-        op: op.clone(), ty: ty.clone(), i: i.clone()
-    };
+    let ne = find_neutral_element(&op, &ty, &i)?;
     let rhs = Expr::BinOp {
-        lhs: Box::new(lhs.clone()),
+        lhs: Box::new(lhs_expr.clone()),
         op,
         rhs: Box::new(rhs),
         ty: ty.clone(),
         i: i.clone()
     };
-    let inner_stmt = Stmt::Assign {dst: lhs, expr: rhs, labels: vec![], i: i.clone()};
+    let inner_stmt = Stmt::Assign {
+        dst: lhs_expr.clone(), expr: rhs, labels: vec![], i: i.clone()
+    };
     let niters = dims.into_iter().map(|(n, _)| n as i128).product();
     let stmt = Stmt::For {
         var: reduce_id,
@@ -324,13 +355,15 @@ fn generate_reduction_loop(
         labels: l,
         i: i.clone()
     };
-    let pre_stmt = Stmt::Definition {
-        ty,
-        id,
-        expr: ne,
-        labels: vec![],
-        i: i.clone()
-    };
+    let pre_stmt = match lhs {
+        ReduceTargetType::Definition {e: Expr::Var {id, ty, ..}} => {
+            Ok(Stmt::Definition {ty, id, expr: ne, labels: vec![], i: i.clone()})
+        },
+        ReduceTargetType::Assign {e} => {
+            Ok(Stmt::Assign {dst: e, expr: ne, labels: vec![], i: i.clone()})
+        },
+        _ => py_internal_error!(i, "Invalid form of reduce target type")
+    }?;
     Ok(Stmt::WithGpuContext {body: vec![pre_stmt, stmt], i: i.clone()})
 }
 
@@ -364,7 +397,8 @@ fn replace_slices_assignment(
     rhs: Expr,
     labels: Vec<String>,
     i: Info,
-    scalar_sizes: &ScalarSizes
+    scalar_sizes: &ScalarSizes,
+    is_definition: bool
 ) -> PyResult<Stmt> {
     // If neither side of the assignment contains a slice, we reconstruct the original statement.
     // Otherwise, it is a slice statement, which is processed differently depending on whether it
@@ -390,6 +424,11 @@ fn replace_slices_assignment(
         if lslices == 0 && is_reduction(&rhs) {
             // Reduction over all dimensions. The left-hand side must be a variable, and the right-hand
             // side uses one of the built-in reduction operations.
+            let lhs = if is_definition {
+                ReduceTargetType::Definition {e: lhs}
+            } else {
+                ReduceTargetType::Assign {e: lhs}
+            };
             generate_reduction_loop(lhs, rhs, labels, i, dims, scalar_sizes)
         } else if lslices >= rslices {
             // A mapping slice operation, which is repeated over all values included in the mentioned
@@ -420,13 +459,13 @@ fn replace_slices_stmt(s: Stmt, scalar_sizes: &ScalarSizes) -> PyResult<Stmt> {
                 }
             };
             let lhs = Expr::Var {id, ty, i: i.clone()};
-            replace_slices_assignment(reconstruct_def, lhs, expr, labels, i, scalar_sizes)
+            replace_slices_assignment(reconstruct_def, lhs, expr, labels, i, scalar_sizes, true)
         },
         Stmt::Assign {dst, expr, labels, i} => {
             let reconstruct_assign = |lhs, rhs, labels, i| {
                 Stmt::Assign {dst: lhs, expr: rhs, labels, i}
             };
-            replace_slices_assignment(reconstruct_assign, dst, expr, labels, i, scalar_sizes)
+            replace_slices_assignment(reconstruct_assign, dst, expr, labels, i, scalar_sizes, false)
         },
         Stmt::Label {..} | Stmt::For {..} | Stmt::While {..} | Stmt::If {..} |
         Stmt::Return {..} | Stmt::WithGpuContext {..} | Stmt::Call {..} => {
