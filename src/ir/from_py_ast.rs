@@ -329,9 +329,6 @@ fn to_ir_expr(
                 .unwrap_or(LoopPar::default());
             Ok(Expr::Call {id, args, par, ty, i})
         },
-        py_ast::Expr::NeutralElement {i, ..} => {
-            parpy_internal_error!(i, "Intermediate reduction node remaining during IR translation")
-        },
         py_ast::Expr::Builtin {func, args, ty, i, ..} => {
             let args = args.into_iter()
                 .map(|e| to_ir_expr(env, e))

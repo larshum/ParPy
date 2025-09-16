@@ -224,11 +224,6 @@ impl PrettyPrint for Expr {
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
             },
-            Expr::NeutralElement {op, ty, ..} => {
-                let (env, op) = op.pprint(env);
-                let (env, ty) = ty.pprint(env);
-                (env, format!("neutral_element<{op}, {ty}>"))
-            },
             Expr::Builtin {func, args, ..} => {
                 let (env, func) = func.pprint(env);
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
