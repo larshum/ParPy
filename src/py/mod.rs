@@ -65,22 +65,18 @@ pub fn specialize_ast_on_arguments<'py>(
     // this framework at all.
     par::ensure_parallelism(&main, &opts.parallelize)?;
 
-    // Perform the type-checking and inlining of literal values in an intertwined manner. First, we
-    // type-check the parameters based on the corresponding arguments provided in the function
-    // call. Second, once the parameters have been typed, we inline the values of scalar parameters
-    // into the AST.
-    //
-    // This particular order is important, because it allows us to reason about the exact sizes of
-    // all slices and by extension the correctness of dimensions of slice operations.
-    let scalar_sizes = ScalarSizes::from_opts(&opts);
-    let main = inline_const::inline_scalar_values(main, &args)?;
-    debug_env.print("Python-like AST after inlining", &main);
-
     // Applies the type-checker, which resolves shape sizes and monomorphizes functions based on
     // the provided arguments. The result is an AST containing all monomorphized versions of
     // top-level definitions.
+    let scalar_sizes = ScalarSizes::from_opts(&opts);
     let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
     debug_env.print("Python-like AST after type-checking", &ast);
+
+    // Inline the values of any scalar arguments provided to the main function. This may
+    // significantly improve performance as it provides additional information to the underlying
+    // compiler, but results in the need to JIT when this value changes.
+    let ast = inline_const::inline_scalar_values(ast, &args)?;
+    debug_env.print("Python-like AST after inlining", &ast);
 
     // Transform slice statements into for-loops.
     let ast = slice_transformation::apply(ast, &scalar_sizes)?;

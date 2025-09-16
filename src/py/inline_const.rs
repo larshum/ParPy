@@ -133,18 +133,19 @@ fn add_scalar_constant<'py>(
 }
 
 pub fn inline_scalar_values<'py>(
-    def: FunDef,
+    ast: Ast,
     args: &Vec<Bound<'py, PyAny>>
-) -> PyResult<FunDef> {
+) -> PyResult<Ast> {
     let const_map = args.iter()
-        .zip(def.params.iter())
+        .zip(ast.main.params.iter())
         .fold(Ok(BTreeMap::new()), |acc, (arg, Param {id, ty, i})| {
             let target = Expr::Var {
                 id: id.clone(), ty: ty.clone(), i: i.clone()
             };
             add_scalar_constant(acc?, target, arg)
         })?;
-    replace_constants_def(&const_map, def)
+    let main = replace_constants_def(&const_map, ast.main)?;
+    Ok(Ast {main, ..ast})
 }
 
 #[cfg(test)]
