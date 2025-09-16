@@ -459,6 +459,13 @@ impl<T: Clone + TypeCheck + SMapAccum<T>> TypeCheck for Vec<T> {
     }
 }
 
+/// We allow the use of integers in conditional expressions, assuming they can be used
+/// interchangeably. If a backend does not support the use of integers in conditions, it could
+/// rewrite a condition 'e' as 'e != 0'.
+fn is_conditional_type(ty: &Type) -> bool {
+    ty.is_bool_scalar() || ty.is_int_scalar()
+}
+
 fn type_check_unop(
     op: &UnOp,
     arg: &Expr,
@@ -670,7 +677,7 @@ impl TypeCheck for Expr {
             Expr::IfExpr {cond, thn, els, ty: _, i} => {
                 let (env, cond) = cond.type_check(env)?;
                 let cond_ty = cond.get_type();
-                if cond_ty.is_bool_scalar() {
+                if is_conditional_type(&cond_ty) {
                     let (env, thn) = thn.type_check(env)?;
                     let (env, els) = els.type_check(env)?;
                     let thn_type = thn.get_type().clone();
@@ -767,7 +774,7 @@ impl TypeCheck for Stmt {
             },
             Stmt::While {cond, body, i} => {
                 let (env, cond) = cond.type_check(env)?;
-                if cond.get_type().is_bool_scalar() {
+                if is_conditional_type(cond.get_type()) {
                     let (env, body) = body.type_check(env)?;
                     Ok((env, Stmt::While {cond, body, i}))
                 } else {
@@ -776,7 +783,7 @@ impl TypeCheck for Stmt {
             },
             Stmt::If {cond, thn, els, i} => {
                 let (env, cond) = cond.type_check(env)?;
-                if cond.get_type().is_bool_scalar() {
+                if is_conditional_type(cond.get_type()) {
                     let (env, thn) = thn.type_check(env)?;
                     let (env, els) = els.type_check(env)?;
                     Ok((env, Stmt::If {cond, thn, els, i}))
