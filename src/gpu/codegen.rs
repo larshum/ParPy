@@ -795,7 +795,12 @@ mod test {
         let init = binop(
             int(0, None),
             BinOp::Add,
-            binop(int(1, None), BinOp::Mul, thread_idx(Dim::X), ty.clone()),
+            binop(
+                int(1, None),
+                BinOp::Mul,
+                convert(ty.clone(), thread_idx(Dim::X)),
+                ty.clone()
+            ),
             ty.clone()
         );
         let incr = binop(
@@ -823,9 +828,14 @@ mod test {
         let s = _gen_for(par::LoopPar::default().reduce().threads(2000).unwrap());
         let ty = scalar(ElemSize::I64);
         let idx = binop(
-            binop(block_idx(Dim::X), BinOp::Mul, int(1024, None), ty.clone()),
+            binop(
+                convert(ty.clone(), block_idx(Dim::X)),
+                BinOp::Mul,
+                int(1024, None),
+                ty.clone()
+            ),
             BinOp::Add,
-            thread_idx(Dim::X),
+            convert(ty.clone(), thread_idx(Dim::X)),
             ty.clone()
         );
         let init = binop(int(0, None), BinOp::Add, idx.clone(), ty.clone());

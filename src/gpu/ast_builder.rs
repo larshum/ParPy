@@ -52,6 +52,10 @@ pub fn block_idx(dim: Dim) -> Expr {
     Expr::BlockIdx {dim, ty: scalar(ElemSize::I64), i: Info::default()}
 }
 
+pub fn convert(ty: Type, e: Expr) -> Expr {
+    Expr::Convert {ty, e: Box::new(e)}
+}
+
 pub fn array_access(target: Expr, idx: Expr, ty: Type) -> Expr {
     Expr::ArrayAccess {target: Box::new(target), idx: Box::new(idx), ty, i: Info::default()}
 }
