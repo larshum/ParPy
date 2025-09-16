@@ -77,6 +77,33 @@ fn from_gpu_ir_type(env: &CodegenEnv, ty: gpu_ast::Type, i: &Info) -> CompileRes
     }
 }
 
+fn validate_binary_operation(
+    op: &BinOp, ty: &Type, i: &Info
+) -> CompileResult<()> {
+    match op {
+        BinOp::Pow => match ty.get_scalar_elem_size() {
+            Some(ElemSize::F32 | ElemSize::F64) => Ok(()),
+            Some(_) | None => {
+                let ty = ty.pprint_default();
+                parpy_type_error!(i, "Unsupported type {ty} of binary operator Pow.")
+            }
+        },
+        BinOp::Atan2 => match ty.get_scalar_elem_size() {
+            Some(ElemSize::F64) => Ok(()),
+            Some(ElemSize::F16 | ElemSize::F32) => {
+                parpy_type_error!(i, "Operation atan2 is only supported \
+                                      for 64-bit floats.")
+            },
+            Some(_) | None => {
+                let ty = ty.pprint_default();
+                parpy_type_error!(i, "Unexpected type {ty} of atan2 \
+                                      builtin (expected float).")
+            }
+        },
+        _ => Ok(())
+    }
+}
+
 fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
     let ty = from_gpu_ir_type(env, e.get_type().clone(), &e.get_info())?;
     match e {
@@ -85,12 +112,18 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
         gpu_ast::Expr::Int {v, i, ..} => Ok(Expr::Int {v, ty, i}),
         gpu_ast::Expr::Float {v, i, ..} => Ok(Expr::Float {v, ty, i}),
         gpu_ast::Expr::UnOp {op, arg, i, ..} => {
-            let arg = Box::new(from_gpu_ir_expr(env, *arg)?);
-            Ok(Expr::UnOp {op, arg, ty, i})
+            let arg = from_gpu_ir_expr(env, *arg)?;
+            match (&op, &ty) {
+                (UnOp::Abs, Type::Scalar {sz}) if sz.is_unsigned_integer() => {
+                    Ok(arg)
+                },
+                _ => Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
+            }
         },
         gpu_ast::Expr::BinOp {lhs, op, rhs, i, ..} => {
             let lhs = Box::new(from_gpu_ir_expr(env, *lhs)?);
             let rhs = Box::new(from_gpu_ir_expr(env, *rhs)?);
+            validate_binary_operation(&op, &ty, &i)?;
             Ok(Expr::BinOp {lhs, op, rhs, ty, i})
         },
         gpu_ast::Expr::IfExpr {cond, thn, els, i, ..} => {

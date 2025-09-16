@@ -45,16 +45,23 @@ fn validate_binary_operation(
     op: &BinOp, ty: &Type, i: &Info
 ) -> CompileResult<()> {
     match op {
+        BinOp::Pow => match ty.get_scalar_elem_size() {
+            Some(ElemSize::F32 | ElemSize::F64) => Ok(()),
+            Some(_) | None => {
+                let ty = ty.pprint_default();
+                parpy_type_error!(i, "Unsupported type {ty} of binary operator Pow.")
+            }
+        },
         BinOp::Atan2 => match ty.get_scalar_elem_size() {
             Some(ElemSize::F64) => Ok(()),
             Some(ElemSize::F16 | ElemSize::F32) => {
                 parpy_type_error!(i, "Operation atan2 is only supported \
-                                        for 64-bit floats.")
+                                      for 64-bit floats.")
             },
             Some(_) | None => {
                 let ty = ty.pprint_default();
                 parpy_type_error!(i, "Unexpected type {ty} of atan2 \
-                                        builtin (expected float).")
+                                      builtin (expected float).")
             }
         },
         _ => Ok(())
@@ -71,7 +78,12 @@ fn from_gpu_ir_expr(e: gpu_ast::Expr) -> CompileResult<Expr> {
         gpu_ast::Expr::UnOp {op, arg, i, ..} => {
             let arg = from_gpu_ir_expr(*arg)?;
             validate_unary_operation(&op, &ty, &i)?;
-            Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
+            match (&op, &ty) {
+                (UnOp::Abs, Type::Scalar {sz}) if sz.is_unsigned_integer() => {
+                    Ok(arg)
+                },
+                _ => Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
+            }
         },
         gpu_ast::Expr::BinOp {lhs, op, rhs, i, ..} => {
             let lhs = from_gpu_ir_expr(*lhs)?;
