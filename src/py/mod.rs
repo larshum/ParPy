@@ -83,7 +83,7 @@ pub fn specialize_ast_on_arguments<'py>(
     debug_env.print("Python-like AST after type-checking", &ast);
 
     // Transform slice statements into for-loops.
-    let ast = slice_transformation::apply(ast)?;
+    let ast = slice_transformation::apply(ast, &scalar_sizes)?;
     debug_env.print("Python-like AST after slice transformation", &ast);
 
     Ok(ast)

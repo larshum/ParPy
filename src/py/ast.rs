@@ -128,6 +128,17 @@ pub enum ReduceOp {
     #[default] Max, Min, Sum, Prod
 }
 
+impl ReduceOp {
+    pub fn to_bin_op(&self) -> BinOp {
+        match self {
+            ReduceOp::Max => BinOp::Max,
+            ReduceOp::Min => BinOp::Min,
+            ReduceOp::Sum => BinOp::Add,
+            ReduceOp::Prod => BinOp::Mul,
+        }
+    }
+}
+
 #[derive(Clone, Debug, EnumIter)]
 pub enum Expr {
     Var {id: Name, ty: Type, i: Info},

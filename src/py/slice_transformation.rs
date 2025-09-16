@@ -1,22 +1,415 @@
 use super::ast::*;
-use crate::utils::info::Info;
+use crate::py_internal_error;
+use crate::py_runtime_error;
+use crate::par;
+use crate::utils::ast::*;
+use crate::utils::err::*;
+use crate::utils::info::*;
 use crate::utils::name::Name;
-use crate::utils::smap::SMapAccum;
+use crate::utils::smap::*;
 
+use itertools::Itertools;
 use pyo3::prelude::*;
+use std::collections::BTreeMap;
 
-fn replace_slices_assignment(
-    reconstruct_stmt: impl Fn(Expr, Expr, Vec<String>, Info) -> Stmt,
-    def_id: Option<Name>,
+fn count_slice_dims_index(acc: usize, idx: &Expr) -> usize {
+    match idx {
+        Expr::Slice {..} => acc + 1,
+        _ => idx.sfold(acc, count_slice_dims_index)
+    }
+}
+
+fn count_slice_dims_expr(acc: usize, e: &Expr) -> usize {
+    match e {
+        Expr::Subscript {target, idx, ..} => {
+            let acc = count_slice_dims_expr(acc, target);
+            let idx_acc = count_slice_dims_index(0, idx);
+            usize::max(acc, idx_acc)
+        },
+        _ => e.sfold(acc, count_slice_dims_expr)
+    }
+}
+
+fn is_reduction(rhs: &Expr) -> bool {
+    match rhs {
+        Expr::ReduceOp {..} => true,
+        _ => false
+    }
+}
+
+fn unify_shapes_helper<'a>(
+    mut acc: Vec<i64>,
+    mut l: impl Iterator<Item=&'a i64>,
+    mut r: impl Iterator<Item=&'a i64>
+) -> Option<Vec<i64>> {
+    match (l.next(), r.next()) {
+        (Some(ls), Some(rs)) if ls == rs || *ls == 1 || *rs == 1 => {
+            acc.push(i64::max(*ls, *rs));
+            unify_shapes_helper(acc, l, r)
+        },
+        (Some(_), Some(_)) => None,
+        (Some(s), None) | (None, Some(s)) => {
+            acc.push(*s);
+            unify_shapes_helper(acc, l, r)
+        },
+        (None, None) => Some(acc)
+    }
+}
+
+fn unify_shapes(
+    lshape: Vec<i64>,
+    rshape: Vec<i64>,
+    i: &Info
+) -> PyResult<Vec<i64>> {
+    let lit = lshape.iter().rev();
+    let rit = rshape.iter().rev();
+    match unify_shapes_helper(vec![], lit, rit) {
+        Some(mut acc) => {
+            acc.reverse();
+            Ok(acc)
+        },
+        None => {
+            let lsh = lshape.iter().join(", ");
+            let rsh = rshape.iter().join(", ");
+            py_runtime_error!(i, "Found incompatible shapes [{lsh}] and [{rsh}].")
+        }
+    }
+}
+
+fn extract_tensor_shape(shape: &Vec<TensorShape>, i: &Info) -> PyResult<Vec<i64>> {
+    shape.iter()
+        .map(|sh| match sh {
+            TensorShape::Num {n} => Ok(*n),
+            TensorShape::Symbol {..} => {
+                py_internal_error!(i, "Found shape symbol in slice transformation.")
+            }
+        })
+        .collect::<PyResult<Vec<i64>>>()
+}
+
+fn extract_target_shape(target: &Expr) -> PyResult<Vec<i64>> {
+    let i = target.get_info();
+    let ty = target.get_type();
+    match ty {
+        Type::Tensor {shape, ..} => extract_tensor_shape(shape, &i),
+        _ => py_runtime_error!(i, "Invalid type of slice target {ty}")
+    }
+}
+
+fn extract_slice_lower_bound(lo: &Option<Box<Expr>>, i: &Info) -> PyResult<i128> {
+    match lo {
+        Some(l) => match l.as_ref() {
+            Expr::Int {v, ..} => Ok(*v),
+            _ => py_runtime_error!(i, "Failed to statically determine lower-bound of slice."),
+        },
+        None => Ok(0)
+    }
+}
+
+fn extract_slice_upper_bound(hi: &Option<Box<Expr>>, dim: i64, i: &Info) -> PyResult<i128> {
+    let n = match hi {
+        Some(u) => match u.as_ref() {
+            Expr::Int {v, ..} => Ok(*v),
+            _ => py_runtime_error!(i, "Failed to statically determine upper-bound of slice."),
+        },
+        None => Ok(dim as i128)
+    }?;
+    if n < 0 { Ok(n + dim as i128) } else { Ok(n) }
+}
+
+fn extract_index_dim(dim: i64, idx: &Expr) -> PyResult<i64> {
+    match idx {
+        Expr::Slice {lo, hi, i, ..} => {
+            let l = extract_slice_lower_bound(lo, &i)?;
+            let u = extract_slice_upper_bound(hi, dim, &i)?;
+            if l < u {
+                Ok((u - l) as i64)
+            } else {
+                py_runtime_error!(i, "Slice lower-bound ({l}) must be less than \
+                                      its upper-bound ({u}).")
+            }
+        },
+        _ => Ok(0)
+    }
+}
+
+fn extract_index_dims(shape: Vec<i64>, idx: &Expr) -> PyResult<Vec<i64>> {
+    match idx {
+        Expr::Tuple {elems, i, ..} => {
+            if shape.len() == elems.len() {
+                elems.iter()
+                    .zip(shape.iter())
+                    .map(|(e, dim)| extract_index_dim(*dim, &e))
+                    .collect::<PyResult<Vec<i64>>>()
+            } else {
+                py_runtime_error!(i, "Tuple index does not address all dimensions of target.")
+            }
+        },
+        _ => Ok(vec![extract_index_dim(shape[0], idx)?])
+    }
+}
+
+fn extract_shape_expr(acc: Vec<i64>, e: &Expr) -> PyResult<Vec<i64>> {
+    match e {
+        Expr::Subscript {target, idx, i, ..} => {
+            let shape = extract_target_shape(&target)?;
+            let dims = extract_index_dims(shape, &idx)?;
+            let result_shape = dims.into_iter()
+                .filter(|dim| *dim > 0)
+                .collect::<Vec<i64>>();
+            unify_shapes(acc, result_shape, &i)
+        },
+        _ => e.sfold_result(Ok(acc), extract_shape_expr)
+    }
+}
+
+fn extract_shape(
+    lhs: &Expr,
+    rhs: &Expr,
+    i: &Info
+) -> PyResult<Vec<i64>> {
+    let lsh = extract_shape_expr(vec![], &lhs)?;
+    let rsh = extract_shape_expr(vec![], &rhs)?;
+    unify_shapes(lsh, rsh, &i)
+}
+
+fn insert_slice_dim_ids_index<'a>(ids: &'a[Name], e: Expr) -> (&'a[Name], Expr) {
+    match e {
+        Expr::Slice {lo, i, ty, ..} => {
+            let l = extract_slice_lower_bound(&lo, &i).unwrap();
+            let slice_dim = Expr::BinOp {
+                lhs: Box::new(Expr::Int {v: l, ty: ty.clone(), i: i.clone()}),
+                op: BinOp::Add,
+                rhs: Box::new(Expr::Var {id: ids[0].clone(), ty: ty.clone(), i: i.clone()}),
+                ty, i
+            };
+            (&ids[1..], slice_dim)
+        },
+        _ => e.smap_accum_l(ids, insert_slice_dim_ids_index)
+    }
+}
+
+fn insert_slice_dim_ids(ids: &[Name], e: Expr) -> Expr {
+    match e {
+        Expr::Subscript {target, idx, ty, i} => {
+            let (_, idx) = insert_slice_dim_ids_index(ids, *idx);
+            Expr::Subscript {target, idx: Box::new(idx), ty, i}
+        },
+        _ => e.smap(|e| insert_slice_dim_ids(ids, e))
+    }
+}
+
+fn substitute_variables(e: Expr, subs: &BTreeMap<Name, Expr>) -> Expr {
+    match e {
+        Expr::Var {id, ty, i} => {
+            match subs.get(&id) {
+                Some(e) => e.clone(),
+                None => Expr::Var {id, ty, i}
+            }
+        },
+        _ => e.smap(|e| substitute_variables(e, subs))
+    }
+}
+
+fn mk_int(v: i128, scalar_sizes: &ScalarSizes, i: &Info) -> Expr {
+    let ty = Type::Tensor {sz: scalar_sizes.int.clone(), shape: vec![]};
+    Expr::Int {v, ty, i: i.clone()}
+}
+
+fn derive_dims_from_reduce_id_helper(
+    mut sub_map: BTreeMap<Name, Expr>,
+    dims: &[(i64, Name)],
+    reduce_var: &Expr,
+    scalar_sizes: &ScalarSizes
+) -> BTreeMap<Name, Expr> {
+    if dims.is_empty() {
+        sub_map
+    } else {
+        let i = reduce_var.get_info();
+        let (dim, id) = &dims[0];
+        let right_dims = &dims[1..];
+        let divn = right_dims.iter().map(|(n, _)| *n as i128).product();
+        let remn = *dim as i128;
+        let sub_expr = Expr::BinOp {
+            lhs: Box::new(Expr::BinOp {
+                lhs: Box::new(reduce_var.clone()),
+                op: BinOp::Div,
+                rhs: Box::new(mk_int(divn, &scalar_sizes, &i)),
+                ty: reduce_var.get_type().clone(),
+                i: i.clone()
+            }),
+            op: BinOp::Rem,
+            rhs: Box::new(mk_int(remn, &scalar_sizes, &i)),
+            ty: reduce_var.get_type().clone(),
+            i: i.clone()
+        };
+        sub_map.insert(id.clone(), sub_expr);
+        derive_dims_from_reduce_id_helper(sub_map, &dims[1..], reduce_var, scalar_sizes)
+    }
+}
+
+
+fn derive_dims_from_reduce_id(
+    e: Expr,
+    reduce_id: &Name,
+    dims: &Vec<(i64, Name)>,
+    scalar_sizes: &ScalarSizes
+) -> Expr {
+    let reduce_var = Expr::Var {
+        id: reduce_id.clone(), ty: e.get_type().clone(), i: e.get_info()
+    };
+    let sub_map = derive_dims_from_reduce_id_helper(
+        BTreeMap::new(), &dims[..], &reduce_var, &scalar_sizes
+    );
+    substitute_variables(e, &sub_map)
+}
+
+fn generate_reduction_loop(
     lhs: Expr,
     rhs: Expr,
     mut labels: Vec<String>,
-    i: Info
+    i: Info,
+    dims: Vec<(i64, Name)>,
+    scalar_sizes: &ScalarSizes
 ) -> PyResult<Stmt> {
-    todo!()
+    let reduce_id = Name::sym_str("reduce_dim");
+    let rhs = derive_dims_from_reduce_id(rhs, &reduce_id, &dims, &scalar_sizes);
+
+    // Extract the labels associated with the reduction (must be either zero or one), and add a
+    // special label to inform later stages of the compiler that this is a parallel reduction.
+    let l = match labels.len() {
+        0 => Ok(vec![par::REDUCE_PAR_LABEL.to_string()]),
+        1 => Ok(vec![labels.pop().unwrap(), par::REDUCE_PAR_LABEL.to_string()]),
+        n => {
+            py_runtime_error!(
+                i,
+                "Found {n} labels on reduction statement.\n\
+                 A reduction operation should be annotated with either zero \
+                 or one labels (the label refers to all dimensions we reduce \
+                 over)."
+            )
+        }
+    }?;
+
+    // Extract the relevant values from the left- and right-hand side arguments of the reduction
+    // operation. The exact form of a reduction is checked before this function is called, so we
+    // report an internal error if these assumptions do not hold.
+    let (id, ty) = match lhs.clone() {
+        Expr::Var {id, ty, ..} => Ok((id, ty)),
+        _ => py_internal_error!(i, "Invalid form of reduction operation")
+    }?;
+    let (op, rhs) = match rhs {
+        Expr::ReduceOp {op, arg, ..} => Ok((op.to_bin_op(), *arg)),
+        _ => py_internal_error!(i, "Invalid form of reduction operation")
+    }?;
+
+    let ne = Expr::NeutralElement {
+        op: op.clone(), ty: ty.clone(), i: i.clone()
+    };
+    let rhs = Expr::BinOp {
+        lhs: Box::new(lhs.clone()),
+        op,
+        rhs: Box::new(rhs),
+        ty: ty.clone(),
+        i: i.clone()
+    };
+    let inner_stmt = Stmt::Assign {dst: lhs, expr: rhs, labels: vec![], i: i.clone()};
+    let niters = dims.into_iter().map(|(n, _)| n as i128).product();
+    let stmt = Stmt::For {
+        var: reduce_id,
+        lo: mk_int(0, scalar_sizes, &i),
+        hi: mk_int(niters, scalar_sizes, &i),
+        step: 1,
+        body: vec![inner_stmt],
+        labels: l,
+        i: i.clone()
+    };
+    let pre_stmt = Stmt::Definition {
+        ty,
+        id,
+        expr: ne,
+        labels: vec![],
+        i: i.clone()
+    };
+    Ok(Stmt::WithGpuContext {body: vec![pre_stmt, stmt], i: i.clone()})
 }
 
-fn replace_slices_stmt(s: Stmt) -> PyResult<Stmt> {
+fn generate_mapping_loops(
+    lhs: Expr,
+    rhs: Expr,
+    mut labels: Vec<String>,
+    i: Info,
+    dims: Vec<(i64, Name)>,
+    scalar_sizes: &ScalarSizes
+) -> PyResult<Stmt> {
+    let mut stmt = Stmt::Assign {dst: lhs, expr: rhs, labels: vec![], i: i.clone()};
+    for (shape, id) in dims.into_iter().rev() {
+        let for_label = labels.pop().map(|l| vec![l]).unwrap_or(vec![]);
+        stmt = Stmt::For {
+            var: id,
+            lo: mk_int(0, scalar_sizes, &i),
+            hi: mk_int(shape as i128, scalar_sizes, &i),
+            step: 1,
+            body: vec![stmt],
+            labels: for_label,
+            i: i.clone()
+        };
+    }
+    Ok(stmt)
+}
+
+fn replace_slices_assignment(
+    reconstruct_stmt: impl Fn(Expr, Expr, Vec<String>, Info) -> Stmt,
+    lhs: Expr,
+    rhs: Expr,
+    labels: Vec<String>,
+    i: Info,
+    scalar_sizes: &ScalarSizes
+) -> PyResult<Stmt> {
+    // If neither side of the assignment contains a slice, we reconstruct the original statement.
+    // Otherwise, it is a slice statement, which is processed differently depending on whether it
+    // performs a reduction or not.
+    let lslices = count_slice_dims_expr(0, &lhs);
+    let rslices = count_slice_dims_expr(0, &rhs);
+    let ndims = usize::max(lslices, rslices);
+    if ndims == 0 {
+        Ok(reconstruct_stmt(lhs, rhs, labels, i))
+    } else {
+        // Extract a single shape containing each dimension of the slices involved in the slice
+        // statement. Each slice is replaced by an identifier used to distinguish a particular
+        // dimension it refers to.
+        let shape = extract_shape(&lhs, &rhs, &i)?;
+        let ids = shape.iter()
+            .map(|_| Name::sym_str("slice_dim"))
+            .collect::<Vec<Name>>();
+        let lhs = insert_slice_dim_ids(&ids[..], lhs);
+        let rhs = insert_slice_dim_ids(&ids[..], rhs);
+        let dims = shape.into_iter()
+            .zip(ids.into_iter())
+            .collect::<Vec<(i64, Name)>>();
+        if lslices == 0 && is_reduction(&rhs) {
+            // Reduction over all dimensions. The left-hand side must be a variable, and the right-hand
+            // side uses one of the built-in reduction operations.
+            generate_reduction_loop(lhs, rhs, labels, i, dims, scalar_sizes)
+        } else if lslices >= rslices {
+            // A mapping slice operation, which is repeated over all values included in the mentioned
+            // slices. This also has to ensure all dimensions of slices add up relative to each other.
+            generate_mapping_loops(lhs, rhs, labels, i, dims, scalar_sizes)
+        } else {
+            // The left-hand side contains fewer slice dimensions than the right hand side. This
+            // form of slice statements are not supported as it corresponds to writing multiple
+            // values to a single memory location (i.e., a form of reduction).
+            py_runtime_error!(
+                i,
+                "Slice statements cannot have more slice dimensions in the \
+                 right-hand side expression than in the left-hand side \
+                 expression (found {rslices} in RHS and {lslices} in LHS)."
+            )
+        }
+    }
+}
+
+fn replace_slices_stmt(s: Stmt, scalar_sizes: &ScalarSizes) -> PyResult<Stmt> {
     match s {
         Stmt::Definition {ty, id, expr, labels, i} => {
             let reconstruct_def = |lhs, rhs, labels, i| {
@@ -26,39 +419,36 @@ fn replace_slices_stmt(s: Stmt) -> PyResult<Stmt> {
                     unreachable!()
                 }
             };
-            let def_data = Some(id.clone());
             let lhs = Expr::Var {id, ty, i: i.clone()};
-            replace_slices_assignment(reconstruct_def, def_data, lhs, expr, labels, i)
+            replace_slices_assignment(reconstruct_def, lhs, expr, labels, i, scalar_sizes)
         },
         Stmt::Assign {dst, expr, labels, i} => {
             let reconstruct_assign = |lhs, rhs, labels, i| {
                 Stmt::Assign {dst: lhs, expr: rhs, labels, i}
             };
-            let def_data = None;
-            replace_slices_assignment(reconstruct_assign, def_data, dst, expr, labels, i)
+            replace_slices_assignment(reconstruct_assign, dst, expr, labels, i, scalar_sizes)
         },
         Stmt::Label {..} | Stmt::For {..} | Stmt::While {..} | Stmt::If {..} |
         Stmt::Return {..} | Stmt::WithGpuContext {..} | Stmt::Call {..} => {
-            s.smap_result(replace_slices_stmt)
+            s.smap_result(|s| replace_slices_stmt(s, scalar_sizes))
         }
     }
 }
 
-fn replace_slices_fun_def(def: FunDef) -> PyResult<FunDef> {
-    // TODO: what slice properties to validate?
-    let body = def.body.smap_result(replace_slices_stmt)?;
+fn replace_slices_fun_def(def: FunDef, scalar_sizes: &ScalarSizes) -> PyResult<FunDef> {
+    let body = def.body.smap_result(|s| replace_slices_stmt(s, scalar_sizes))?;
     Ok(FunDef {body, ..def})
 }
 
-fn replace_slices_top(t: Top) -> PyResult<Top> {
+fn replace_slices_top(t: Top, scalar_sizes: &ScalarSizes) -> PyResult<Top> {
     match t {
         Top::ExtDecl {..} => Ok(t),
-        Top::FunDef {v} => Ok(Top::FunDef {v: replace_slices_fun_def(v)?})
+        Top::FunDef {v} => Ok(Top::FunDef {v: replace_slices_fun_def(v, scalar_sizes)?})
     }
 }
 
-pub fn apply(ast: Ast) -> PyResult<Ast> {
-    let tops = ast.tops.smap_result(replace_slices_top)?;
-    let main = replace_slices_fun_def(ast.main)?;
+pub fn apply(ast: Ast, scalar_sizes: &ScalarSizes) -> PyResult<Ast> {
+    let tops = ast.tops.smap_result(|t| replace_slices_top(t, scalar_sizes))?;
+    let main = replace_slices_fun_def(ast.main, scalar_sizes)?;
     Ok(Ast {tops, main})
 }

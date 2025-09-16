@@ -1,5 +1,5 @@
 use crate::ir::ast as ir_ast;
-use crate::py::ast::{BinOp, Builtin, ElemSize};
+use crate::py::ast::{BinOp, ElemSize};
 use crate::py::ast as py_ast;
 use crate::gpu::ast as gpu_ast;
 use crate::utils::info::*;
@@ -83,16 +83,6 @@ pub fn neutral_element<T: ExprLit>(
         BinOp::Mul => Some(T::generate_literal(1.0, sz, i)),
         BinOp::Max => Some(T::generate_literal(f64::NEG_INFINITY, sz, i)),
         BinOp::Min => Some(T::generate_literal(f64::INFINITY, sz, i)),
-        _ => None
-    }
-}
-
-pub fn builtin_to_reduction_op(func: &Builtin) -> Option<BinOp> {
-    match func {
-        Builtin::Sum => Some(BinOp::Add),
-        Builtin::Prod => Some(BinOp::Mul),
-        Builtin::Max => Some(BinOp::Max),
-        Builtin::Min => Some(BinOp::Min),
         _ => None
     }
 }
