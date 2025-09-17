@@ -90,9 +90,9 @@ def test_return_in_main_function():
                 y = parpy.operators.sum(x[:])
                 return y
         backend = enabled_backends[0]
-        with pytest.raises(RuntimeError) as e_info:
+        with pytest.raises(TypeError) as e_info:
             f_return(np.ndarray(10), opts=par_opts(backend, {}))
-        assert e_info.match(r"The called function f_return cannot return a value")
+        assert e_info.match(r"Main function f_return cannot return a value")
 
 def test_call_without_compiler_options():
     with pytest.raises(RuntimeError) as e_info:

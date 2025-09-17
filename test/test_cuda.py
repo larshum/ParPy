@@ -72,7 +72,7 @@ def test_cuda_graphs_compiles():
         code = gen_code(np.float32, opts)
         fn = parpy.compile_string("col_sum", code, opts)
         assert fn is not None
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def test_cuda_graph_runs_correctly():
     def helper():
@@ -91,7 +91,7 @@ def test_cuda_graph_runs_correctly():
         y2 = np.zeros((N,)).astype(np.float32)
         fn(x, y2, 20)
         assert np.allclose(y1, y2)
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def test_cuda_catch_runtime_error():
     def helper():
@@ -108,7 +108,7 @@ int32_t f() {
         with pytest.raises(RuntimeError) as e_info:
             fn()
         assert e_info.match(r"out of memory")
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def clamp_helper(ext_id):
     params = [("x", types.F32), ("lo", types.F32), ("hi", types.F32)]
@@ -138,24 +138,25 @@ def clamp_helper(ext_id):
 def test_call_user_defined_external_cuda():
     def helper():
         clamp_helper("clamp")
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def test_call_non_existent_external_cuda():
     def helper():
         with pytest.raises(RuntimeError, match="Compilation of generated CUDA code failed"):
             clamp_helper("clamp_non_existent")
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def test_call_invalid_decl_external_cuda():
     def helper():
         with pytest.raises(RuntimeError, match="Compilation of generated CUDA code failed"):
             clamp_helper("clamp_non_device")
-    run_if_backend_is_enabled(parpy.CompileBackend.Cuda, helper)
+    run_if_backend_is_enabled(backend, helper)
 
 def test_call_external_array_op_cuda():
     def helper():
+        N = types.symbol('N')
         @parpy.external("sum_row_ext", backend, parpy.Target.Device, header="<cuda_utils.h>")
-        def sum_row(x: types.pointer(types.F64), n: types.I64) -> types.F64:
+        def sum_row(x: types.buffer(types.F64, [N]), n: types.I64) -> types.F64:
             s = 0.0
             for i in range(n):
                 s += x[i]
@@ -174,27 +175,26 @@ def test_call_external_array_op_cuda():
         assert torch.allclose(y, torch.sum(x, dim=1))
     run_if_backend_is_enabled(backend, helper)
 
-def test_call_external_inconsistent_shapes_cuda():
+def test_call_external_distinct_shapes_cuda():
     def helper():
+        N = types.symbol('N')
         @parpy.external("sum_row_ext", backend, parpy.Target.Device, header="<cuda_utils.h>")
-        def sum_row(x: types.pointer(types.F64), n: types.I64) -> types.F64:
+        def sum_row(x: types.buffer(types.F64, [N]), n: types.I64) -> types.F64:
             s = 0.0
             for i in range(n):
                 s += x[i]
             return s
 
-        with pytest.raises(TypeError, match="incompatible types"):
-            @parpy.jit
-            def sum_ext_seq(out, x, y):
-                with parpy.gpu:
-                    out[0] = sum_row(x, 10) + sum_row(y, 20)
-            x = torch.randn(10, dtype=torch.float64)
-            y = torch.randn(20, dtype=torch.float64)
-            out = torch.zeros(1, dtype=torch.float64)
-            opts = par_opts(backend, {})
-            opts.includes += ['test/code']
-            sum_ext_seq(out, x, y, opts=opts)
-            assert torch.allclose(out, torch.sum(x) + torch.sum(y))
+        def sum_ext_seq(out, x, y):
+            with parpy.gpu:
+                out[0] = sum_row(x, 10) + sum_row(y, 20)
+        x = torch.randn(10, dtype=torch.float64)
+        y = torch.randn(20, dtype=torch.float64)
+        out = torch.zeros(1, dtype=torch.float64)
+        opts = par_opts(backend, {})
+        opts.includes += ['test/code']
+        parpy.jit(sum_ext_seq)(out, x, y, opts=opts)
+        assert torch.allclose(out, torch.sum(x) + torch.sum(y))
     run_if_backend_is_enabled(backend, helper)
 
 def test_host_external_cuda_fails():
@@ -205,10 +205,11 @@ def test_host_external_cuda_fails():
 
 def test_block_parallel_external_cuda():
     def helper():
+        N = types.symbol('N')
         @parpy.external(
                 "warp_sum", backend, parpy.Target.Device,
                 header="<cuda_utils.h>", parallelize=parpy.threads(32))
-        def warp_sum_custom(x: types.pointer(types.F32)) -> types.F32:
+        def warp_sum_custom(x: types.buffer(types.F32, [N])) -> types.F32:
             return np.sum(x)
 
         @parpy.jit

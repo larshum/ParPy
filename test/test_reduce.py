@@ -33,26 +33,6 @@ def min_rows(x, out, N):
         parpy.label('inner')
         out[i] = parpy.operators.min(x[i,:])
 
-def sum_axis(x, out, N):
-    parpy.label('outer')
-    parpy.label('inner')
-    out[:] = parpy.operators.sum(x[:,:], axis=1)
-
-def prod_axis(x, out, N):
-    parpy.label('outer')
-    parpy.label('inner')
-    out[:] = parpy.operators.prod(x[:,:], axis=1)
-
-def max_axis(x, out, N):
-    parpy.label('outer')
-    parpy.label('inner')
-    out[:] = parpy.operators.max(x[:,:], axis=1)
-
-def min_axis(x, out, N):
-    parpy.label('outer')
-    parpy.label('inner')
-    out[:] = parpy.operators.min(x[:,:], axis=1)
-
 def sum_2d(x, out, N):
     parpy.label('outer')
     out[0] = parpy.operators.sum(x[:,:])
@@ -89,10 +69,6 @@ reduce_funs = [
     prod_rows,
     max_rows,
     min_rows,
-    sum_axis,
-    prod_axis,
-    max_axis,
-    min_axis,
     sum_2d,
     prod_2d,
     max_2d,

@@ -109,11 +109,12 @@ def is_invalid_div_or_rem_call(fn, ldtype, rdtype):
     return ((fn.__name__ == "parpy_div_int" or fn.__name__ == "parpy_rem") and
         (is_float_dtype(ldtype) or is_float_dtype(rdtype)))
 
-# There is no 'pow' implementation for 16-bit floats in CUDA
-def is_invalid_pow_call(fn, ldtype, rdtype):
+# The implementation of 'pow' only supports floats, and for CUDA there is no
+# implementation for 16-bit floats.
+def is_invalid_pow_call(fn, ldtype, rdtype, backend):
     return (fn.__name__ == "parpy_pow" and
         ((not is_float_dtype(ldtype) and not is_float_dtype(rdtype)) or
-        (ldtype == np.float16 and rdtype == np.float16)))
+        (backend == parpy.CompileBackend.Cuda and ldtype == np.float16 and rdtype == np.float16)))
 
 # When subtraction of untyped integers overflows, we get a warning that causes
 # tests to fail. As we pick random values, we do not know until the numbers
@@ -128,12 +129,10 @@ class RunType(Enum):
     Skip = 2
 
 def set_expected_behavior_binop(fn, ldtype, rdtype, backend):
-    if is_invalid_div_or_rem_call(fn, ldtype, rdtype):
-        return RunType.ShouldFail, r"Invalid type .* of integer arithmetic operation"
-    elif is_invalid_pow_call(fn, ldtype, rdtype):
-        return RunType.ShouldFail, r"Invalid type .* of floating-point arithmetic operation"
-    elif fn in bitwise_funs and (is_float_dtype(ldtype) or is_float_dtype(rdtype)):
-        return RunType.ShouldFail, r"Invalid type .* of bitwise operation"
+    if (is_invalid_div_or_rem_call(fn, ldtype, rdtype) or
+            is_invalid_pow_call(fn, ldtype, rdtype, backend) or
+            (fn in bitwise_funs and (is_float_dtype(ldtype) or is_float_dtype(rdtype)))):
+        return RunType.ShouldFail, r"Unsupported type .* of binary operator .*"
     elif backend == parpy.CompileBackend.Metal and \
          (ldtype == np.float64 or rdtype == np.float64):
         return RunType.ShouldFail, r"Metal does not support double-precision floating-point numbers."

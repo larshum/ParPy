@@ -53,11 +53,11 @@ def slice_assign_to_new_var(x):
 
 def slice_assign_invalid_dims(x, y):
     with parpy.gpu:
-        y[:] = parpy.operators.sum(x[:,:,:], axis=0)
+        y[:] = parpy.operators.sum(x[:,:,:])
 
 def slice_reduce_incompatible_shapes(x, y, out):
     with parpy.gpu:
-        out[0] = parpy.operators.sum(x[:,:] * y[:], axis=0)
+        out[0] = parpy.operators.sum(x[:,:] * y[:])
 
 def slice_reduce_in_loop(x, y, N, out):
     parpy.label('N')
@@ -140,13 +140,13 @@ fun_specs = [
     ( slice_reduce_in_loop, [tensor(10, 10), tensor(10, 10), 10, tensor(10)]),
     ( slice_invalid_reduce_assignment
     , [tensor(10, 10), tensor(10, 10), tensor(10, 10), 10]
-    , RuntimeError, r"When reducing along all dimensions,.*" ),
+    , RuntimeError, r"A slice reduction produces a scalar result.*" ),
     ( slice_invalid_dims, [tensor(10, 10), tensor(10, 10), 10]
-    , TypeError, r"Indexing with 3 dimensions on tensor of shape .*" ),
-    ( slice_in_range, [tensor(10), tensor(10)], RuntimeError
-    , r"Slice expressions are only allowed in assignment.*"),
-    ( temp_slices, [tensor(7), tensor(10), tensor(10)], RuntimeError
-    , r"Target of slice must be a variable." )
+    , TypeError, r"Slices must address all dimensions of the target.*" ),
+    ( slice_in_range, [tensor(10).astype(np.int32), tensor(10).astype(np.int32)], RuntimeError
+    , r"Slices can only be used in an assignment statement.*"),
+    ( temp_slices, [tensor(7), tensor(10), tensor(10)], TypeError
+    , r"Slices must address all dimensions of the target.*" )
 ]
 
 @pytest.mark.parametrize('spec', fun_specs)
