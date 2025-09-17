@@ -207,11 +207,15 @@ fn unify_parameter_type(
 ) -> PyResult<(UnifyEnv, Vec<Param>)> {
     let (env, mut params) = acc?;
     let Param {id, ty, i} = param;
-    let (env, ty) = match unify_types(env, ty.clone(), arg_type.clone(), &i) {
+    let (env, ty) = match unify_types(env.clone(), ty.clone(), arg_type.clone(), &i) {
         Ok((env, ty)) => Ok((env, ty)),
         Err(_) => {
+            let vars = env.shape_vars.into_iter()
+                .map(|(id, n)| format!("{id} = {n}"))
+                .join(", ");
             py_type_error!(i, "Parameter {id} was annotated with type {ty} \
-                               which is incompatible with argument type {arg_type}.")
+                               which is incompatible with argument type {arg_type}.\n
+                               Where {vars}")
         }
     }?;
     params.push(Param {id, ty, i});
