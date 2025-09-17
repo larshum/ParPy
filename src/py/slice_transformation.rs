@@ -421,15 +421,23 @@ fn replace_slices_assignment(
         let dims = shape.into_iter()
             .zip(ids.into_iter())
             .collect::<Vec<(i64, Name)>>();
-        if lslices == 0 && is_reduction(&rhs) {
-            // Reduction over all dimensions. The left-hand side must be a variable, and the right-hand
-            // side uses one of the built-in reduction operations.
-            let lhs = if is_definition {
-                ReduceTargetType::Definition {e: lhs}
+        if is_reduction(&rhs) {
+            if lslices == 0 {
+                // Reduction over all dimensions. The left-hand side must be a variable, and the right-hand
+                // side uses one of the built-in reduction operations.
+                let lhs = if is_definition {
+                    ReduceTargetType::Definition {e: lhs}
+                } else {
+                    ReduceTargetType::Assign {e: lhs}
+                };
+                generate_reduction_loop(lhs, rhs, labels, i, dims, scalar_sizes)
             } else {
-                ReduceTargetType::Assign {e: lhs}
-            };
-            generate_reduction_loop(lhs, rhs, labels, i, dims, scalar_sizes)
+                py_runtime_error!(
+                    i,
+                    "A slice reduction produces a scalar result, while the \
+                     left-hand side of the assignment expects a slice of arguments."
+                )
+            }
         } else if lslices >= rslices {
             // A mapping slice operation, which is repeated over all values included in the mentioned
             // slices. This also has to ensure all dimensions of slices add up relative to each other.
@@ -486,8 +494,41 @@ fn replace_slices_top(t: Top, scalar_sizes: &ScalarSizes) -> PyResult<Top> {
     }
 }
 
+fn ensure_no_remaining_slices_expr(e: Expr) -> PyResult<Expr> {
+    match e {
+        Expr::Slice {i, ..} => {
+            py_runtime_error!(i, "Slices can only be used in an assignment statement.")
+        },
+        _ => e.smap_result(ensure_no_remaining_slices_expr)
+    }
+}
+
+fn ensure_no_remaining_slices_stmt(s: Stmt) -> PyResult<Stmt> {
+    s.smap_result(ensure_no_remaining_slices_stmt)?
+        .smap_result(ensure_no_remaining_slices_expr)
+}
+
+fn ensure_no_remaining_slices_fun_def(def: FunDef) -> PyResult<FunDef> {
+    let body = def.body.smap_result(ensure_no_remaining_slices_stmt)?;
+    Ok(FunDef {body, ..def})
+}
+
+fn ensure_no_remaining_slices_top(t: Top) -> PyResult<Top> {
+    match t {
+        Top::ExtDecl {..} => Ok(t),
+        Top::FunDef {v} => Ok(Top::FunDef {v: ensure_no_remaining_slices_fun_def(v)?})
+    }
+}
+
+fn ensure_no_remaining_slices(ast: Ast) -> PyResult<Ast> {
+    Ok(Ast {
+        main: ensure_no_remaining_slices_fun_def(ast.main)?,
+        tops: ast.tops.smap_result(ensure_no_remaining_slices_top)?
+    })
+}
+
 pub fn apply(ast: Ast, scalar_sizes: &ScalarSizes) -> PyResult<Ast> {
     let tops = ast.tops.smap_result(|t| replace_slices_top(t, scalar_sizes))?;
     let main = replace_slices_fun_def(ast.main, scalar_sizes)?;
-    Ok(Ast {tops, main})
+    ensure_no_remaining_slices(Ast {tops, main})
 }
