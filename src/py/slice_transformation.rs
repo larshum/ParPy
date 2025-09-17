@@ -532,3 +532,92 @@ pub fn apply(ast: Ast, scalar_sizes: &ScalarSizes) -> PyResult<Ast> {
     let main = replace_slices_fun_def(ast.main, scalar_sizes)?;
     ensure_no_remaining_slices(Ast {tops, main})
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::test::*;
+    use crate::py::ast_builder::*;
+
+    #[test]
+    fn count_slice_dims_scalar_index() {
+        let target = var("x", tyuk());
+        let index = int(0, Some(ElemSize::I64));
+        let e = subscript(target, index, tyuk());
+        assert_eq!(count_slice_dims_expr(0, &e), 0);
+    }
+
+    #[test]
+    fn count_slice_dims_singleton_slice() {
+        let target = var("x", tyuk());
+        let index = slice(None, None);
+        let e = subscript(target, index, tyuk());
+        assert_eq!(count_slice_dims_expr(0, &e), 1);
+    }
+
+    #[test]
+    fn count_slice_dims_add_slice_exprs() {
+        let lhs = subscript(
+            var("x", tyuk()),
+            slice(None, None),
+            tyuk()
+        );
+        let rhs = subscript(
+            var("y", tyuk()),
+            tuple(vec![slice(None, None), slice(None, None)]),
+            tyuk()
+        );
+        let e = binop(lhs, BinOp::Add, rhs, tyuk());
+        assert_eq!(count_slice_dims_expr(0, &e), 2);
+    }
+
+    #[test]
+    fn unify_equal_shapes() {
+        let sh = vec![10, 20];
+        assert_eq!(unify_shapes(sh.clone(), sh.clone(), &i()).unwrap(), sh);
+    }
+
+    #[test]
+    fn unify_shapes_broadcasting() {
+        let lsh = vec![];
+        let rsh = vec![10];
+        assert_eq!(unify_shapes(lsh, rsh, &i()).unwrap(), vec![10]);
+    }
+
+    #[test]
+    fn unify_shapes_broadcast_multidims() {
+        let lsh = vec![10, 1, 30, 1];
+        let rsh = vec![1, 20, 30, 40];
+        assert_eq!(unify_shapes(lsh, rsh, &i()).unwrap(), vec![10, 20, 30, 40]);
+    }
+
+    #[test]
+    fn extract_tensor_shape_num() {
+        let sh = vec![TensorShape::Num {n: 10}];
+        assert_eq!(extract_tensor_shape(&sh, &i()).unwrap(), vec![10]);
+    }
+
+    #[test]
+    fn extract_tensor_shape_symbol_fails() {
+        let sh = vec![TensorShape::Symbol {id: id("x")}];
+        assert_py_error_matches(extract_tensor_shape(&sh, &i()), "Found shape symbol");
+    }
+
+    #[test]
+    fn extract_index_dims_scalar_index() {
+        let idx = int(1, None);
+        assert_eq!(extract_index_dims(vec![10], &idx).unwrap(), vec![0]);
+    }
+
+    #[test]
+    fn extract_index_dims_scalar_and_slice_indices() {
+        let idx = tuple(vec![slice(None, None), int(1, None)]);
+        assert_eq!(extract_index_dims(vec![10, 20], &idx).unwrap(), vec![10, 0]);
+    }
+
+    #[test]
+    fn extract_index_dims_partial_slice() {
+        let idx = slice(Some(int(2, None)), None);
+        assert_eq!(extract_index_dims(vec![10], &idx).unwrap(), vec![8]);
+    }
+}

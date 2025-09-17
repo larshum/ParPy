@@ -704,8 +704,6 @@ mod test {
     use crate::test::*;
     use crate::py::ast_builder::*;
 
-    use strum::IntoEnumIterator;
-
     fn make_env<'py, 'a>(
         py: Python<'py>,
         tops: &'a BTreeMap<String, Bound<'py, PyCapsule>>,

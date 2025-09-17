@@ -80,7 +80,7 @@ fn unify_shape(
             match env.lookup_shape_symbol(&id) {
                 Some(m) if n == m => Ok((env, TensorShape::Num {n})),
                 Some(m) => py_type_error!(i, "Failed to unify shape variable \
-                                              {id} (={m}) with {n}."),
+                                              {id} = {m} with {n}."),
                 None => {
                     let env = env.insert_shape_symbol(id, n);
                     Ok((env, TensorShape::Num {n}))
@@ -92,7 +92,7 @@ fn unify_shape(
                 (Some(l), Some(r)) if l == r => Ok((env, TensorShape::Num {n: l})),
                 (Some(l), Some(r)) => {
                     py_type_error!(i, "Failed to unify shape variables \
-                                       {lid} (={l}) and {rid} (={r}).")
+                                       {lid} = {l} and {rid} = {r}.")
                 },
                 (None, Some(n)) => {
                     let env = env.insert_shape_symbol(lid, n);
@@ -103,7 +103,7 @@ fn unify_shape(
                     Ok((env, TensorShape::Num {n}))
                 },
                 (None, None) => {
-                    py_internal_error!(i, "Encountered two unresolved shape \
+                    py_internal_error!(i, "Cannot unify unresolved shape \
                                            symbols {lid} and {rid}.")
                 }
             }
@@ -141,7 +141,7 @@ fn unify_types(
 ) -> PyResult<(UnifyEnv, Type)> {
     match (lty, rty) {
         (Type::Unknown, Type::Unknown) => {
-            py_internal_error!(i, "Cannot unify two unknown types")
+            py_internal_error!(i, "Unknown types cannot be unified")
         },
         (Type::Unknown, ty) | (ty, Type::Unknown) => Ok((env, ty)),
         (Type::String, Type::String) => Ok((env, Type::String)),
@@ -469,11 +469,25 @@ impl<T: Clone + TypeCheck + SMapAccum<T>> TypeCheck for Vec<T> {
     }
 }
 
-/// We allow the use of integers in conditional expressions, assuming they can be used
-/// interchangeably. If a backend does not support the use of integers in conditions, it could
-/// rewrite a condition 'e' as 'e != 0'.
-fn is_conditional_type(ty: &Type) -> bool {
-    ty.is_bool_scalar() || ty.is_int_scalar()
+// Ensure that the provided expression is a valid condition. For an integer conditions, we
+// automatically insert an inequality comparison with zero, to convert them to a proper boolean
+// condition. Other types of conditions result in an error.
+fn ensure_conditional_type(cond: Expr) -> PyResult<Expr> {
+    let i = cond.get_info();
+    let cond_ty = cond.get_type().clone();
+    if cond_ty.is_bool_scalar() {
+        Ok(cond)
+    } else if cond_ty.is_int_scalar() {
+        Ok(Expr::BinOp {
+            lhs: Box::new(cond),
+            op: BinOp::Neq,
+            rhs: Box::new(Expr::Int {v: 0, ty: cond_ty.clone(), i: i.clone()}),
+            ty: Type::Tensor {sz: ElemSize::Bool, shape: vec![]},
+            i
+        })
+    } else {
+        py_type_error!(i, "Conditions must be boolean or integer values, found {cond_ty}")
+    }
 }
 
 fn type_check_unop(
@@ -682,20 +696,15 @@ impl TypeCheck for Expr {
             },
             Expr::IfExpr {cond, thn, els, ty: _, i} => {
                 let (env, cond) = cond.type_check(env)?;
-                let cond_ty = cond.get_type();
-                if is_conditional_type(&cond_ty) {
-                    let (env, thn) = thn.type_check(env)?;
-                    let (env, els) = els.type_check(env)?;
-                    let thn_type = thn.get_type().clone();
-                    let els_type = els.get_type().clone();
-                    let (_, ty) = unify_types(UnifyEnv::new(None), thn_type, els_type, &i)?;
-                    let thn = Box::new(coerce_type(thn, &ty)?);
-                    let els = Box::new(coerce_type(els, &ty)?);
-                    Ok((env, Expr::IfExpr {cond: Box::new(cond), thn, els, ty, i}))
-                } else {
-                    py_type_error!(i, "Expected boolean condition in \
-                                       if-expression, found {cond_ty}.")
-                }
+                let cond = ensure_conditional_type(cond)?;
+                let (env, thn) = thn.type_check(env)?;
+                let (env, els) = els.type_check(env)?;
+                let thn_type = thn.get_type().clone();
+                let els_type = els.get_type().clone();
+                let (_, ty) = unify_types(UnifyEnv::new(None), thn_type, els_type, &i)?;
+                let thn = Box::new(coerce_type(thn, &ty)?);
+                let els = Box::new(coerce_type(els, &ty)?);
+                Ok((env, Expr::IfExpr {cond: Box::new(cond), thn, els, ty, i}))
             },
             Expr::Subscript {target, idx, ty: _, i} => {
                 let (env, target) = target.type_check(env)?;
@@ -780,22 +789,16 @@ impl TypeCheck for Stmt {
             },
             Stmt::While {cond, body, i} => {
                 let (env, cond) = cond.type_check(env)?;
-                if is_conditional_type(cond.get_type()) {
-                    let (env, body) = body.type_check(env)?;
-                    Ok((env, Stmt::While {cond, body, i}))
-                } else {
-                    py_type_error!(i, "While loop condition must be a boolean value.")
-                }
+                let cond = ensure_conditional_type(cond)?;
+                let (env, body) = body.type_check(env)?;
+                Ok((env, Stmt::While {cond, body, i}))
             },
             Stmt::If {cond, thn, els, i} => {
                 let (env, cond) = cond.type_check(env)?;
-                if is_conditional_type(cond.get_type()) {
-                    let (env, thn) = thn.type_check(env)?;
-                    let (env, els) = els.type_check(env)?;
-                    Ok((env, Stmt::If {cond, thn, els, i}))
-                } else {
-                    py_type_error!(i, "If condition must be a boolean value")
-                }
+                let cond = ensure_conditional_type(cond)?;
+                let (env, thn) = thn.type_check(env)?;
+                let (env, els) = els.type_check(env)?;
+                Ok((env, Stmt::If {cond, thn, els, i}))
             },
             Stmt::Return {value, i} => {
                 let (env, value) = value.type_check(env)?;
@@ -973,4 +976,489 @@ pub fn apply<'py>(
     let env = TypeCheckEnv::new(tops, scalar_sizes.clone());
     let arg_types = extract_argument_types(args, &scalar_sizes, &i)?;
     type_check_main(env, main, arg_types)
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::test::*;
+    use crate::py::ast_builder::*;
+
+    use std::ffi::CString;
+    use strum::IntoEnumIterator;
+
+    #[test]
+    fn unify_bool_size() {
+        assert_eq!(
+            unify_elem_size(ElemSize::Bool, ElemSize::Bool, &i()).unwrap(),
+            ElemSize::Bool
+        );
+    }
+
+    #[test]
+    fn unify_i16_i32_size() {
+        assert_eq!(
+            unify_elem_size(ElemSize::I16, ElemSize::I32, &i()).unwrap(),
+            ElemSize::I32
+        );
+    }
+
+    #[test]
+    fn unify_int_float_sizes_fails() {
+        assert!(unify_elem_size(ElemSize::I32, ElemSize::F32, &i()).is_err());
+    }
+
+    #[test]
+    fn unify_signed_unsigned_int_fails() {
+        assert!(unify_elem_size(ElemSize::I32, ElemSize::U32, &i()).is_err());
+    }
+
+    fn mk_unify_env() -> UnifyEnv {
+        UnifyEnv::new(None)
+    }
+
+    fn ts_num(n: i64) -> TensorShape {
+        TensorShape::Num {n}
+    }
+
+    fn ts_sym(id: Name) -> TensorShape {
+        TensorShape::Symbol {id}
+    }
+
+    #[test]
+    fn unify_numerical_tensor_shapes() {
+        let env = mk_unify_env();
+        let sh = ts_num(10);
+        let (env, r) = unify_shape(env, sh.clone(), sh.clone(), &i()).unwrap();
+        assert!(env.shape_vars.is_empty());
+        assert_eq!(r, sh);
+    }
+
+    #[test]
+    fn unify_num_symb_tensor_shapes() {
+        let env = mk_unify_env();
+        let lsh = ts_num(10);
+        let rsh = ts_sym(id("x"));
+        let (env, r) = unify_shape(env, lsh, rsh, &i()).unwrap();
+        assert_eq!(env.shape_vars.len(), 1);
+        assert!(env.shape_vars.contains_key(&id("x")));
+        assert_eq!(r, ts_num(10));
+    }
+
+    #[test]
+    fn unify_num_symb_inconsistent_tensor_shapes_fails() {
+        let env = mk_unify_env()
+            .insert_shape_symbol(id("x"), 20);
+        let lsh = ts_num(10);
+        let rsh = ts_sym(id("x"));
+        let r = unify_shape(env, lsh, rsh, &i());
+        assert_py_error_matches(r, "Failed to unify shape variable x = 20 with 10.");
+    }
+
+    #[test]
+    fn unify_symb_consistent_tensor_shapes() {
+        let env = mk_unify_env()
+            .insert_shape_symbol(id("x"), 10)
+            .insert_shape_symbol(id("y"), 10);
+        let lsh = ts_sym(id("x"));
+        let rsh = ts_sym(id("y"));
+        let (env, r) = unify_shape(env, lsh, rsh, &i()).unwrap();
+        assert_eq!(env.shape_vars.len(), 2);
+        assert!(env.shape_vars.contains_key(&id("x")));
+        assert!(env.shape_vars.contains_key(&id("y")));
+        assert_eq!(r, ts_num(10));
+    }
+
+    #[test]
+    fn unify_symb_inconsistent_tensor_shapes() {
+        let env = mk_unify_env()
+            .insert_shape_symbol(id("x"), 10)
+            .insert_shape_symbol(id("y"), 20);
+        let lsh = ts_sym(id("x"));
+        let rsh = ts_sym(id("y"));
+        let r = unify_shape(env, lsh, rsh, &i());
+        assert_py_error_matches(r, "Failed to unify shape variables x = 10 and y = 20.");
+    }
+
+    #[test]
+    fn unify_symb_lhs_known_tensor_shapes() {
+        let env = mk_unify_env().insert_shape_symbol(id("x"), 10);
+        let lsh = ts_sym(id("x"));
+        let rsh = ts_sym(id("y"));
+        let (env, r) = unify_shape(env, lsh, rsh, &i()).unwrap();
+        assert_eq!(env.shape_vars.len(), 2);
+        assert_eq!(env.shape_vars.get(&id("y")).cloned(), Some(10));
+        assert_eq!(r, ts_num(10));
+    }
+
+    #[test]
+    fn unify_unknown_symbols_tensor_shapes() {
+        let env = mk_unify_env();
+        let lsh = ts_sym(id("x"));
+        let rsh = ts_sym(id("y"));
+        let r = unify_shape(env, lsh, rsh, &i());
+        assert_py_error_matches(r, "Cannot unify unresolved shape symbols x and y.");
+    }
+
+    #[test]
+    fn unify_shapes_same_length() {
+        let env = mk_unify_env();
+        let lsh = vec![ts_num(10)];
+        let rsh = vec![ts_num(10)];
+        let (env, r) = unify_shapes(env, lsh, rsh, &i()).unwrap();
+        assert!(env.shape_vars.is_empty());
+        assert_eq!(r, vec![ts_num(10)]);
+    }
+
+    #[test]
+    fn unify_shapes_with_vars() {
+        let env = mk_unify_env();
+        let lsh = vec![ts_sym(id("x")), ts_num(10)];
+        let rsh = vec![ts_num(20), ts_sym(id("y"))];
+        let (env, r) = unify_shapes(env, lsh, rsh, &i()).unwrap();
+        assert_eq!(env.shape_vars.len(), 2);
+        assert_eq!(env.shape_vars.get(&id("x")).cloned(), Some(20));
+        assert_eq!(env.shape_vars.get(&id("y")).cloned(), Some(10));
+        assert_eq!(r, vec![ts_num(20), ts_num(10)]);
+    }
+
+    #[test]
+    fn unify_incompatible_shapes_fails() {
+        let env = mk_unify_env();
+        let lsh = vec![ts_num(10), ts_num(20), ts_num(30)];
+        let rsh = vec![ts_sym(id("x")), ts_sym(id("y")), ts_sym(id("x"))];
+        let r = unify_shapes(env, lsh, rsh, &i());
+        assert_py_error_matches(r, r"Failed to unify shape variable x = 10 with 30.");
+    }
+
+    #[test]
+    fn unify_shapes_with_distinct_lengths_fails() {
+        let env = mk_unify_env();
+        let lsh = vec![ts_num(10), ts_num(20)];
+        let rsh = vec![ts_sym(id("x"))];
+        let r = unify_shapes(env, lsh, rsh, &i());
+        assert_py_error_matches(r, "Found incompatible tensor shapes .*");
+    }
+
+    #[test]
+    fn unify_unknown_types_fails() {
+        let env = mk_unify_env();
+        let r = unify_types(env, Type::Unknown, Type::Unknown, &i());
+        assert_py_error_matches(r, "Unknown types cannot be unified");
+    }
+
+    #[test]
+    fn unify_string_types() {
+        let env = mk_unify_env();
+        assert!(unify_types(env, Type::String, Type::String, &i()).is_ok());
+    }
+
+    #[test]
+    fn unify_equivalent_scalar_tensor_types() {
+        let env = mk_unify_env();
+        let ty = scalar(ElemSize::F32);
+        let (_, r) = unify_types(env, ty.clone(), ty.clone(), &i()).unwrap();
+        assert_eq!(r, ty);
+    }
+
+    #[test]
+    fn unify_scalar_int_types() {
+        let env = mk_unify_env();
+        let lty = scalar(ElemSize::I32);
+        let rty = scalar(ElemSize::I64);
+        let (_, r) = unify_types(env, lty, rty, &i()).unwrap();
+        assert_eq!(r, scalar(ElemSize::I64));
+    }
+
+    #[test]
+    fn unify_non_empty_tensor_types() {
+        let env = mk_unify_env();
+        let lty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]};
+        let rty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_sym(id("x"))]};
+        let (env, r) = unify_types(env, lty, rty, &i()).unwrap();
+        assert_eq!(env.shape_vars.get(&id("x")).cloned(), Some(10));
+        assert_eq!(r, Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]});
+    }
+
+    #[test]
+    fn unify_non_empty_distinct_tensor_types_fails() {
+        let env = mk_unify_env();
+        let lty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]};
+        let rty = Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(10)]};
+        let r = unify_types(env, lty, rty, &i());
+        assert_py_error_matches(r, "Failed to unify non-scalar tensors .*");
+    }
+
+    #[test]
+    fn unify_tuples_same_length() {
+        let env = mk_unify_env();
+        let lty = Type::Tuple {elems: vec![scalar(ElemSize::I32)]};
+        let rty = Type::Tuple {elems: vec![scalar(ElemSize::I64)]};
+        let (_, r) = unify_types(env, lty, rty, &i()).unwrap();
+        assert_eq!(r, Type::Tuple {elems: vec![scalar(ElemSize::I64)]});
+    }
+
+    #[test]
+    fn unify_tuples_distinct_length() {
+        let env = mk_unify_env();
+        let lty = Type::Tuple {elems: vec![]};
+        let rty = Type::Tuple {elems: vec![scalar(ElemSize::I32)]};
+        let r = unify_types(env, lty, rty, &i());
+        assert_py_error_matches(r, "Failed to unify tuple types of different lengths");
+    }
+
+    #[test]
+    fn unify_dictionaries_equal_keys() {
+        let env = mk_unify_env();
+        let lty = dict_ty(vec![
+            ("x", scalar(ElemSize::F32)),
+            ("y", scalar(ElemSize::F64))
+        ]);
+        let rty = dict_ty(vec![
+            ("x", scalar(ElemSize::F64)),
+            ("y", scalar(ElemSize::F16))
+        ]);
+        let (_, r) = unify_types(env, lty, rty, &i()).unwrap();
+        let expected = dict_ty(vec![
+            ("x", scalar(ElemSize::F64)),
+            ("y", scalar(ElemSize::F64))
+        ]);
+        assert_eq!(r, expected);
+    }
+
+    #[test]
+    fn unify_dictionaries_distinct_lengths_fails() {
+        let env = mk_unify_env();
+        let lty = dict_ty(vec![]);
+        let rty = dict_ty(vec![("x", tyuk())]);
+        let r = unify_types(env, lty, rty, &i());
+        assert_py_error_matches(r, "Failed to unify dictionary types of different .*");
+    }
+
+    #[test]
+    fn unify_dictionaries_distinct_keys_fails() {
+        let env = mk_unify_env();
+        let lty = dict_ty(vec![("x", tyuk())]);
+        let rty = dict_ty(vec![("y", tyuk())]);
+        let r = unify_types(env, lty, rty, &i());
+        assert_py_error_matches(r, "Failed to unify dictionary types with distinct keys");
+    }
+
+    #[test]
+    fn unify_void_types() {
+        let env = mk_unify_env();
+        let (_, r) = unify_types(env, Type::Void, Type::Void, &i()).unwrap();
+        assert_eq!(r, Type::Void);
+    }
+
+    #[test]
+    fn unify_incompatible_types_fails() {
+        let env = mk_unify_env();
+        let r = unify_types(env, Type::Void, Type::String, &i());
+        assert_py_error_matches(r, "Failed to unify incompatible types .*")
+    }
+
+    #[test]
+    fn unify_parameters_no_annot() {
+        let params = vec![
+            Param {id: id("x"), ty: Type::Unknown, i: i()},
+            Param {id: id("y"), ty: Type::Unknown, i: i()}
+        ];
+        let arg_types = vec![
+            scalar(ElemSize::F32),
+            Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]}
+        ];
+        let (_, r) = unify_parameter_types(params, arg_types, &id("f"), &i()).unwrap();
+        let expected = vec![
+            Param {id: id("x"), ty: scalar(ElemSize::F32), i: i()},
+            Param {
+                id: id("y"),
+                ty: Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]},
+                i: i()
+            }
+        ];
+        assert_eq!(r, expected);
+    }
+
+    #[test]
+    fn unify_parameters_incompatible_annot_fails() {
+        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![ts_sym(id("x"))]};
+        let params = vec![
+            Param {id: id("a"), ty: ty.clone(), i: i()},
+            Param {id: id("b"), ty: ty.clone(), i: i()},
+        ];
+        let arg_types = vec![
+            Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(10)]},
+            Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(20)]},
+        ];
+        let r = unify_parameter_types(params, arg_types, &id("f"), &i());
+        assert_py_error_matches(r, "Parameter b was annotated with type .* \
+                                    which is incompatible with argument type .*");
+    }
+
+    #[test]
+    fn unify_parameters_invalid_number_of_arguments_fails() {
+        let params = vec![];
+        let arg_types = vec![Type::Unknown];
+        let r = unify_parameter_types(params, arg_types, &id("f"), &i());
+        assert_py_error_matches(r, r"Function f expects 0 parameters.*called with 1 argument.*");
+    }
+
+    fn ssz_i32_f32() -> ScalarSizes {
+        ScalarSizes {int: ElemSize::I32, float: ElemSize::F32}
+    }
+
+    fn try_extract_type(s: &str, scalar_sizes: &ScalarSizes, i: &Info, expected: Type) {
+        let s = CString::new(s).unwrap();
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let arg = py.eval(&s, None, None).unwrap();
+            let ty = extract_type(&arg, scalar_sizes, i).unwrap();
+            assert_eq!(ty, expected);
+        })
+    }
+
+    #[test]
+    fn extract_bool_literal_type() {
+        try_extract_type("True", &ssz_i32_f32(), &i(), scalar(ElemSize::Bool));
+    }
+
+    #[test]
+    fn extract_int_literal_types() {
+        let mut ss = ssz_i32_f32();
+        for int_sz in vec![ElemSize::I8, ElemSize::I16, ElemSize::I32, ElemSize::I64] {
+            ss.int = int_sz.clone();
+            try_extract_type("0", &ss, &i(), scalar(int_sz));
+        }
+    }
+
+    #[test]
+    fn extract_float_literal_types() {
+        let mut ss = ssz_i32_f32();
+        for float_sz in vec![ElemSize::F16, ElemSize::F32, ElemSize::F64] {
+            ss.float = float_sz.clone();
+            try_extract_type("0.0", &ss, &i(), scalar(float_sz));
+        }
+    }
+
+    #[test]
+    fn extract_return_type_empty() {
+        assert_eq!(extract_return_type(&vec![]).unwrap(), Type::Void);
+    }
+
+    #[test]
+    fn extract_return_type_returns_value() {
+        let body = vec![return_stmt(int(1, Some(ElemSize::I32)))];
+        assert_eq!(extract_return_type(&body).unwrap(), scalar(ElemSize::I32));
+    }
+
+    #[test]
+    fn extract_incompatible_return_types_fails() {
+        let body = vec![
+            if_stmt(
+                bool_expr(true, Some(ElemSize::Bool)),
+                vec![return_stmt(int(1, Some(ElemSize::I32)))],
+                vec![return_stmt(float(1.0, Some(ElemSize::F32)))]
+            )
+        ];
+        let r = extract_return_type(&body);
+        assert_py_error_matches(r, "Found incompatible return types .* and .*");
+    }
+
+    #[test]
+    fn ensure_bool_conditional() {
+        let cond = bool_expr(true, Some(ElemSize::Bool));
+        assert_eq!(ensure_conditional_type(cond.clone()).unwrap(), cond);
+    }
+
+    #[test]
+    fn ensure_int_conditional() {
+        for int_sz in ElemSize::iter().filter(|sz| sz.is_integer()) {
+            let cond = int(1, Some(int_sz.clone()));
+            let expected = binop(
+                cond.clone(),
+                BinOp::Neq,
+                int(0, Some(int_sz)),
+                scalar(ElemSize::Bool)
+            );
+            assert_eq!(ensure_conditional_type(cond).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn type_check_unary_subtraction_i64() {
+        let r = type_check_unop(&UnOp::Sub, &int(2, Some(ElemSize::I64)), &i());
+        assert_eq!(r.unwrap(), scalar(ElemSize::I64));
+    }
+
+    #[test]
+    fn type_check_unary_subtraction_f16() {
+        let r = type_check_unop(&UnOp::Sub, &float(2.5, Some(ElemSize::F16)), &i());
+        assert_eq!(r.unwrap(), scalar(ElemSize::F16));
+    }
+
+    #[test]
+    fn type_check_unary_subtraction_bool_fails() {
+        let r = type_check_unop(&UnOp::Sub, &bool_expr(true, Some(ElemSize::Bool)), &i());
+        assert_py_error_matches(r, "Unsupported argument type .* of unary operator");
+    }
+
+    #[test]
+    fn type_check_subtraction_distinct_int_types() {
+        let l = int(2, Some(ElemSize::I32));
+        let r = int(3, Some(ElemSize::I16));
+        let (l, ty, r) = type_check_binop(l, &BinOp::Sub, r, &i()).unwrap();
+        assert_eq!(*l, int(2, Some(ElemSize::I32)));
+        assert_eq!(*r, convert(int(3, Some(ElemSize::I16)), scalar(ElemSize::I32)));
+        assert_eq!(ty, scalar(ElemSize::I32));
+    }
+
+    #[test]
+    fn type_check_subtraction_distinct_float_types() {
+        let l = float(2.5, Some(ElemSize::F16));
+        let r = float(3.5, Some(ElemSize::F64));
+        let (l, ty, r) = type_check_binop(l, &BinOp::Sub, r, &i()).unwrap();
+        assert_eq!(*l, convert(float(2.5, Some(ElemSize::F16)), scalar(ElemSize::F64)));
+        assert_eq!(*r, float(3.5, Some(ElemSize::F64)));
+        assert_eq!(ty, scalar(ElemSize::F64));
+    }
+
+    fn mk_tcenv<'py>(params: Vec<Param>) -> TypeCheckEnv<'py> {
+        let ssz = ScalarSizes {int: ElemSize::I32, float: ElemSize::F32};
+        let env = TypeCheckEnv::new(BTreeMap::new(), ssz);
+        env.enter_function(params)
+    }
+
+    #[test]
+    fn type_check_dict_access_expression() {
+        let target = var("x", Type::Unknown);
+        let e = subscript(target, string("a"), Type::Unknown);
+        let params = vec![
+            Param {id: id("x"), ty: dict_ty(vec![("a", scalar(ElemSize::F32))]), i: i()}
+        ];
+        let env = mk_tcenv(params);
+        let (_, e) = e.type_check(env).unwrap();
+        assert_eq!(e.get_type().clone(), scalar(ElemSize::F32));
+    }
+
+    #[test]
+    fn type_check_slice_expression() {
+        let target_shape = vec![
+            TensorShape::Num {n: 10},
+            TensorShape::Num {n: 30},
+            TensorShape::Num {n: 20},
+        ];
+        let target = var("x", Type::Unknown);
+        let index = tuple(vec![slice(None, None), int(4, None), slice(None, None)]);
+        let e = subscript(target, index, Type::Unknown);
+        let params = vec![
+            Param {
+                id: id("x"), ty: Type::Tensor {sz: ElemSize::F32, shape: target_shape},
+                i: i()
+            }
+        ];
+        let env = mk_tcenv(params);
+        let (_, e) = e.type_check(env).unwrap();
+        assert_eq!(e.get_type().clone(), scalar(ElemSize::F32));
+    }
 }

@@ -95,6 +95,10 @@ pub fn call(id: Name, args: Vec<Expr>, ty: Type) -> Expr {
     Expr::Call {id, args, ty, i: Info::default()}
 }
 
+pub fn convert(e: Expr, ty: Type) -> Expr {
+    Expr::Convert {e: Box::new(e), ty}
+}
+
 pub fn assignment(lhs: Expr, rhs: Expr) -> Stmt {
     Stmt::Assign {dst: lhs, expr: rhs, labels: vec![], i: Info::default()}
 }
