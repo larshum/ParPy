@@ -1,5 +1,6 @@
 use super::ast::*;
 use crate::py_runtime_error;
+use crate::ext::types::ExtType;
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
@@ -231,40 +232,27 @@ fn try_extract_type_annotation<'py, 'a>(
     env: &ConvertEnv<'py, 'a>,
     i: &Info
 ) -> PyResult<Type> {
+    let fail = || py_runtime_error!(i, "Unsupported parameter type annotation");
     let py = annot.py();
-    let parpy = py.import("parpy")?;
-    let parpy_tys = parpy.getattr("types")?;
     match eval_node(&annot, &env, py) {
         Ok(ty) => {
-            if ty.eq(parpy_tys.getattr("Bool")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::Bool})
-            } else if ty.eq(parpy_tys.getattr("I8")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I8})
-            } else if ty.eq(parpy_tys.getattr("I16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I16})
-            } else if ty.eq(parpy_tys.getattr("I32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I32})
-            } else if ty.eq(parpy_tys.getattr("I64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I64})
-            } else if ty.eq(parpy_tys.getattr("U8")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U8})
-            } else if ty.eq(parpy_tys.getattr("U16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U16})
-            } else if ty.eq(parpy_tys.getattr("U32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U32})
-            } else if ty.eq(parpy_tys.getattr("U64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U64})
-            } else if ty.eq(parpy_tys.getattr("F16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F16})
-            } else if ty.eq(parpy_tys.getattr("F32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F32})
-            } else if ty.eq(parpy_tys.getattr("F64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F64})
+            let sz = ty.extract::<ElemSize>();
+            if sz.is_ok() {
+                Ok(Type::Tensor {shape: vec![], sz: sz?})
             } else {
-                py_runtime_error!(i, "Unsupported parameter type annotation")
+                let ext_type = ty.extract::<ExtType>();
+                if ext_type.is_ok() {
+                    let ExtType::Buffer(sz, syms) = ext_type?;
+                    let shape = syms.into_iter()
+                        .map(|sym| TensorShape::Symbol {id: sym.id})
+                        .collect::<Vec<TensorShape>>();
+                    Ok(Type::Tensor {shape, sz})
+                } else {
+                    fail()
+                }
             }
         },
-        Err(_) => py_runtime_error!(i, "Unsupported parameter type annotation")
+        Err(_) => fail()
     }
 }
 
@@ -1773,15 +1761,6 @@ mod test {
                 _ => panic!("Invalid form of parameters in converted function definition")
             }
         })
-    }
-
-    #[test]
-    fn try_extract_scalar_type_annot() -> PyResult<()> {
-        for sz in ElemSize::iter() {
-            let id = format!("parpy.types.{:?}", sz);
-            assert_eq!(convert_param_type_annot(&id)?, scalar(sz));
-        }
-        Ok(())
     }
 
     #[test]

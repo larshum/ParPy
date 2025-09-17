@@ -1,4 +1,4 @@
-from .parpy import ElemSize, ExtType
+from .parpy import ElemSize, ExtType, Symbol
 
 Bool = ElemSize.Bool
 I8 = ElemSize.I8
@@ -15,3 +15,6 @@ F64 = ElemSize.F64
 
 def buffer(elem_ty, shape):
     return ExtType.Buffer(elem_ty, shape)
+
+def symbol(id):
+    return Symbol(id)

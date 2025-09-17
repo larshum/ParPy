@@ -125,7 +125,6 @@ fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(get_function_name, m)?)?;
     m.add_function(wrap_pyfunction!(compile_ir, m)?)?;
     m.add_function(wrap_pyfunction!(option::par, m)?)?;
-    m.add_function(wrap_pyfunction!(ext::types::symbol, m)?)?;
     m.add_class::<par::LoopPar>()?;
     m.add_class::<option::CompileBackend>()?;
     m.add_class::<option::CompileOptions>()?;
@@ -134,6 +133,7 @@ fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<utils::ast::Target>()?;
     m.add_class::<ext::buffer::DataType>()?;
     m.add_class::<ext::types::ExtType>()?;
+    m.add_class::<ext::types::Symbol>()?;
     Ok(())
 }
 

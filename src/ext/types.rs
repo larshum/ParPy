@@ -6,15 +6,14 @@ use pyo3::prelude::*;
 #[pyclass(eq, frozen)]
 #[derive(Clone, Debug, PartialEq)]
 pub struct Symbol {
-    id: Name
+    pub id: Name
 }
 
-#[pyfunction]
-pub fn symbol(id: Option<String>) -> Symbol {
-    if let Some(s) = id {
+#[pymethods]
+impl Symbol {
+    #[new]
+    fn new(s: String) -> Symbol {
         Symbol {id: Name::sym_str(&s)}
-    } else {
-        Symbol {id: Name::sym_str("")}
     }
 }
 
