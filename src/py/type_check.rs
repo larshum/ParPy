@@ -610,10 +610,9 @@ fn type_check_tensor_indexing<'py>(
                     Ok(Type::Tensor {sz: sz.clone(), shape: vec![]})
                 } else {
                     let sh = shape.iter().join(", ");
-                    py_type_error!(i, "Slice expressions must address all \
-                                       dimensions of the target.\n\
-                                       Index refers to {ndims} dimensions, while \
-                                       the target has shape [{sh}].")
+                    py_type_error!(i, "Slices must address all dimensions of \
+                                       the target.\n Index refers to {ndims} \
+                                       dimensions, while the target has shape [{sh}].")
                 }
             } else if ndims <= shape.len() {
                 let shape = shape.clone()
