@@ -207,7 +207,13 @@ fn unify_parameter_type(
 ) -> PyResult<(UnifyEnv, Vec<Param>)> {
     let (env, mut params) = acc?;
     let Param {id, ty, i} = param;
-    let (env, ty) = unify_types(env, ty, arg_type, &i)?;
+    let (env, ty) = match unify_types(env, ty.clone(), arg_type.clone(), &i) {
+        Ok((env, ty)) => Ok((env, ty)),
+        Err(_) => {
+            py_type_error!(i, "Parameter {id} was annotated with type {ty} \
+                               which is incompatible with argument type {arg_type}.")
+        }
+    }?;
     params.push(Param {id, ty, i});
     Ok((env, params))
 }
@@ -630,10 +636,7 @@ impl TypeCheck for Expr {
             Expr::Var {id, ty: _, i} => {
                 let ty = match env.lookup_var(&id)? {
                     Some(ty) => Ok(ty.clone()),
-                    None => {
-                        println!("{env:#?}");
-                        py_type_error!(i, "Variable {id} has unknown type")
-                    }
+                    None => py_type_error!(i, "Variable {id} has unknown type")
                 }?;
                 Ok((env, Expr::Var {id, ty, i}))
             },
@@ -726,7 +729,7 @@ impl TypeCheck for Expr {
             },
             Expr::Call {id, args, ty: _, i} => {
                 let (env, args) = args.type_check(env)?;
-                let (env, new_id, ret_ty) = type_check_call(env, &id, &args, &i)?;
+                let (env, new_id, ret_ty, args) = type_check_call(env, &id, args, &i)?;
                 match ret_ty {
                     Type::Void => py_type_error!(i, "Function call expression cannot \
                                                      have void result."),
@@ -801,7 +804,7 @@ impl TypeCheck for Stmt {
             },
             Stmt::Call {func, args, i} => {
                 let (env, args) = args.type_check(env)?;
-                let (env, new_id, ret_ty) = type_check_call(env, &func, &args, &i)?;
+                let (env, new_id, ret_ty, args) = type_check_call(env, &func, args, &i)?;
                 match ret_ty {
                     Type::Void => Ok((env, Stmt::Call {func: new_id, args, i})),
                     ty => py_type_error!(i, "Function call statement must have \
@@ -813,17 +816,63 @@ impl TypeCheck for Stmt {
     }
 }
 
+fn any_parameter_is_annotated(params: &Vec<Param>) -> bool {
+    params.iter().any(|Param {ty, ..}| *ty != Type::Unknown)
+}
+
+fn extract_annotated_params(t: &Top) -> Option<Vec<Param>> {
+    let params = match t {
+        Top::ExtDecl {params, ..} => params,
+        Top::FunDef {v: FunDef {params, ..}} => params,
+    };
+    if any_parameter_is_annotated(&params) {
+        Some(params.clone())
+    } else {
+        None
+    }
+}
+
+fn type_check_argument(
+    arg: Expr,
+    id: Name,
+    ty: Type,
+    i: Info
+) -> PyResult<Expr> {
+    let arg_type = arg.get_type().clone();
+    match coerce_type(arg, &ty) {
+        Ok(e) => Ok(e),
+        Err(_) => {
+            py_type_error!(i, "Parameter {id} was annotated with type {ty} \
+                               which is incompatible with argument type {arg_type}.")
+        }
+    }
+}
+
+fn type_check_arguments(args: Vec<Expr>, annot: Vec<Param>) -> PyResult<Vec<Expr>> {
+    args.into_iter()
+        .zip(annot.into_iter())
+        .map(|(arg, Param {id, ty, i})| type_check_argument(arg, id, ty, i))
+        .collect::<PyResult<Vec<Expr>>>()
+}
+
 fn type_check_call<'py>(
     env: TypeCheckEnv<'py>,
     id: &Name,
-    args: &Vec<Expr>,
+    args: Vec<Expr>,
     i: &Info
-) -> PyResult<(TypeCheckEnv<'py>, Name, Type)> {
-    let arg_types = args.into_iter()
+) -> PyResult<(TypeCheckEnv<'py>, Name, Type, Vec<Expr>)> {
+    let arg_types = args.iter()
         .map(|arg| arg.get_type().clone())
         .collect::<Vec<Type>>();
     match env.lookup_top(id) {
         Some(t) => {
+            // If the parameters of the called function have been annotated with types, we
+            // type-check the provided arguments by attempting to coerce them to the annotated
+            // types.
+            let args = match extract_annotated_params(&t) {
+                Some(annot) => type_check_arguments(args, annot),
+                None => Ok(args)
+            }?;
             let (env, t) = type_check_top(env, t, arg_types)?;
             let (new_id, ret_ty) = match t {
                 Top::ExtDecl {id, res_ty, ..} |
@@ -831,7 +880,7 @@ fn type_check_call<'py>(
                     (id.clone(), res_ty.clone())
                 }
             };
-            Ok((env, new_id, ret_ty))
+            Ok((env, new_id, ret_ty, args))
         },
         None => py_type_error!(i, "Call to unknown function {id}")
     }
