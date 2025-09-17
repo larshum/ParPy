@@ -256,17 +256,6 @@ fn try_extract_type_annotation<'py, 'a>(
     }
 }
 
-fn extract_integer_literal_value(e: Expr) -> Option<i64> {
-    match e {
-        Expr::Int {v, ..} => Some(v as i64),
-        Expr::UnOp {op: UnOp::Sub, arg, ..} => match *arg {
-            Expr::Int {v, ..} => Some(-v as i64),
-            _ => None
-        },
-        _ => None
-    }
-}
-
 fn ensure_no_keyword_arguments<'py>(e: &Bound<'py, PyAny>, i: &Info) -> PyResult<()> {
     if e.getattr("keywords")?.try_iter()?.count() > 0 {
         py_runtime_error!(i, "Keyword arguments are not supported in call nodes")

@@ -198,26 +198,6 @@ impl Expr {
             Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
         }
     }
-
-    pub fn with_type(self, ty: Type) -> Self {
-        match self {
-            Expr::Var {id, i, ..} => Expr::Var {id, ty, i},
-            Expr::String {v, i, ..} => Expr::String {v, ty, i},
-            Expr::Bool {v, i, ..} => Expr::Bool {v, ty, i},
-            Expr::Int {v, i, ..} => Expr::Int {v, ty, i},
-            Expr::Float {v, i, ..} => Expr::Float {v, ty, i},
-            Expr::UnOp {op, arg, i, ..} => Expr::UnOp {op, arg, ty, i},
-            Expr::BinOp {lhs, op, rhs, i, ..} => Expr::BinOp {lhs, op, rhs, ty, i},
-            Expr::ReduceOp {op, arg, i, ..} => Expr::ReduceOp {op, arg, ty, i},
-            Expr::IfExpr {cond, thn, els, i, ..} => Expr::IfExpr {cond, thn, els, ty, i},
-            Expr::Subscript {target, idx, i, ..} => Expr::Subscript {target, idx, ty, i},
-            Expr::Slice {lo, hi, i, ..} => Expr::Slice {lo, hi, ty, i},
-            Expr::Tuple {elems, i, ..} => Expr::Tuple {elems, ty, i},
-            Expr::Call {id, args, i, ..} => Expr::Call {id, args, ty, i},
-            Expr::Builtin {func, args, i, ..} => Expr::Builtin {func, args, ty, i},
-            Expr::Convert {e, ..} => Expr::Convert {e, ty},
-        }
-    }
 }
 
 impl ExprType<Type> for Expr {
