@@ -74,7 +74,7 @@ fn unify_shapes(
         None => {
             let lsh = lshape.iter().join(", ");
             let rsh = rshape.iter().join(", ");
-            py_runtime_error!(i, "Found incompatible shapes [{lsh}] and [{rsh}].")
+            py_type_error!(i, "Found incompatible shapes [{lsh}] and [{rsh}].")
         }
     }
 }
