@@ -91,8 +91,8 @@ pub fn tuple(elems: Vec<Expr>) -> Expr {
     Expr::Tuple {elems, ty, i: Info::default()}
 }
 
-pub fn call(f: &str, args: Vec<Expr>, ty: Type) -> Expr {
-    Expr::Call {id: Name::new(f.to_string()), args, ty, i: Info::default()}
+pub fn call(id: Name, args: Vec<Expr>, ty: Type) -> Expr {
+    Expr::Call {id, args, ty, i: Info::default()}
 }
 
 pub fn assignment(lhs: Expr, rhs: Expr) -> Stmt {

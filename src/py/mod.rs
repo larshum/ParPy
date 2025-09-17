@@ -1,5 +1,6 @@
 pub mod ast;
 mod constant_fold;
+mod eliminate_duplicate_functions;
 mod from_py;
 mod inline_calls;
 mod inline_const;
@@ -67,9 +68,11 @@ pub fn specialize_ast_on_arguments<'py>(
 
     // Applies the type-checker, which resolves shape sizes and monomorphizes functions based on
     // the provided arguments. The result is an AST containing all monomorphized versions of
-    // top-level definitions.
+    // top-level definitions. Before printing the AST, we eliminate unnecessary duplicates of the
+    // same function, as the type-checker may produce such instances.
     let scalar_sizes = ScalarSizes::from_opts(&opts);
     let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
+    let ast = eliminate_duplicate_functions::apply(ast)?;
     debug_env.print("Python-like AST after type-checking", &ast);
 
     // Inline the values of any scalar arguments provided to the main function. This may
