@@ -394,14 +394,22 @@ fn coerce_type(e: Expr, expected_ty: &Type) -> PyResult<Expr> {
         match (actual, expected_ty) {
             (Type::Tensor {sz: lsz, shape: lsh}, Type::Tensor {sz: rsz, shape: rsh}) => {
                 if lsh.is_empty() && rsh.is_empty() {
-                    let sz = unify_elem_size(lsz.clone(), rsz.clone(), &i)?;
-                    let ty = Type::Tensor {sz, shape: vec![]};
-                    Ok(Expr::Convert {e: Box::new(e), ty})
+                    // If we can unify the two types, it means they are compatible with one
+                    // another. In this case, we convert the expression to the expected type.
+                    // Otherwise, the coercion fails.
+                    match unify_elem_size(lsz.clone(), rsz.clone(), &i) {
+                        Ok(_) => {
+                            let ty = Type::Tensor {sz: rsz.clone(), shape: vec![]};
+                            Ok(Expr::Convert {e: Box::new(e), ty})
+                        },
+                        Err(_) => py_type_error!(i, "Cannot coerce element size {lsz} to {rsz}.")
+                    }
                 } else if lsz == rsz {
+                    // If the shapes of the two sides can be unified, that means each shape symbol
+                    // can be coerced to a unique value.
                     let unify_env = UnifyEnv::new(None);
-                    let (_, shape) = unify_shapes(unify_env, lsh.clone(), rsh.clone(), &i)?;
-                    let ty = Type::Tensor {sz: lsz.clone(), shape};
-                    Ok(Expr::Convert {e: Box::new(e), ty})
+                    let _ = unify_shapes(unify_env, lsh.clone(), rsh.clone(), &i)?;
+                    Ok(e)
                 } else {
                     py_type_error!(i, "Cannot coerce non-empty tensor of element size {lsz} to {rsz}.")
                 }
@@ -867,9 +875,6 @@ fn type_check_call<'py>(
     args: Vec<Expr>,
     i: &Info
 ) -> PyResult<(TypeCheckEnv<'py>, Name, Type, Vec<Expr>)> {
-    let arg_types = args.iter()
-        .map(|arg| arg.get_type().clone())
-        .collect::<Vec<Type>>();
     match env.lookup_top(id) {
         Some(t) => {
             // If the parameters of the called function have been annotated with types, we
@@ -879,6 +884,9 @@ fn type_check_call<'py>(
                 Some(annot) => type_check_arguments(args, annot),
                 None => Ok(args)
             }?;
+            let arg_types = args.iter()
+                .map(|arg| arg.get_type().clone())
+                .collect::<Vec<Type>>();
             let (env, t) = type_check_top(env, t, arg_types)?;
             let (new_id, ret_ty) = match t {
                 Top::ExtDecl {id, res_ty, ..} |
@@ -1383,6 +1391,65 @@ mod test {
             );
             assert_eq!(ensure_conditional_type(cond).unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn coerce_equal_types_identity() {
+        let ty = scalar(ElemSize::I32);
+        let e = int(2, Some(ElemSize::I32));
+        assert_eq!(coerce_type(e.clone(), &ty).unwrap(), e);
+    }
+
+    #[test]
+    fn coerce_types_i32_i64() {
+        let ty = scalar(ElemSize::I64);
+        let e = int(2, Some(ElemSize::I32));
+        let expected = convert(e.clone(), ty.clone());
+        assert_eq!(coerce_type(e, &ty).unwrap(), expected);
+    }
+
+    #[test]
+    fn coerce_types_i64_i32() {
+        let ty = scalar(ElemSize::I32);
+        let e = int(2, Some(ElemSize::I64));
+        let expected = convert(e.clone(), ty.clone());
+        assert_eq!(coerce_type(e, &ty).unwrap(), expected);
+    }
+
+    #[test]
+    fn coerce_types_float_to_int_fails() {
+        let ty = scalar(ElemSize::I32);
+        let e = float(2.5, Some(ElemSize::F32));
+        assert_py_error_matches(coerce_type(e, &ty), "Cannot coerce element size .* to .*");
+    }
+
+    #[test]
+    fn coerce_types_non_empty_tensor_distinct_types_fails() {
+        let ty = Type::Tensor {sz: ElemSize::F64, shape: vec![ts_num(10)]};
+        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]});
+        assert_py_error_matches(coerce_type(e, &ty), "Cannot coerce non-empty tensor of element size .* to .*");
+    }
+
+    #[test]
+    fn coerce_types_non_empty_tensor_distinct_shapes_fails() {
+        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(12)]};
+        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]});
+        assert_py_error_matches(coerce_type(e, &ty), "Failed to unify distinct dimensions 10 and 12.");
+    }
+
+    #[test]
+    fn coerce_types_non_empty_tensor_variable() {
+        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]};
+        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_sym(id("N"))]});
+        let expected = var("x", ty.clone());
+        assert_eq!(coerce_type(e, &ty).unwrap(), expected);
+    }
+
+    #[test]
+    fn coerce_types_non_empty_tensor() {
+        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10), ts_num(12)]};
+        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_sym(id("N")), ts_sym(id("N"))]});
+        assert_py_error_matches(coerce_type(e, &ty), "Failed to unify shape variable N.*with");
     }
 
     #[test]
