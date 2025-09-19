@@ -8,6 +8,7 @@ mod labels;
 mod par;
 mod pprint;
 mod replace_builtins;
+mod shape_symbol_labels;
 mod slice_transformation;
 mod specialize;
 mod symbolize;
@@ -36,8 +37,8 @@ pub fn parse_untyped_ast<'py>(
     tops: &BTreeMap<String, Bound<'py, PyCapsule>>,
     vars: (Bound<'py, PyDict>, Bound<'py, PyDict>)
 ) -> PyResult<ast::FunDef> {
-    let ast = from_py::to_untyped_ir(ast, info, tops, vars)?;
-    let ast = symbolize::with_tops(tops, ast)?;
+    let ast = from_py::to_untyped_ir(ast, info, tops, vars.clone())?;
+    let ast = symbolize::with_tops(tops, &vars, ast)?;
     let ast = replace_builtins::apply(ast)?;
     labels::associate_labels(ast)
 }
@@ -61,6 +62,10 @@ pub fn specialize_ast_on_arguments<'py>(
             )
         }
     }?;
+
+    // Adds labels to statements corresponding to the shape symbols they use, if this is enabled in
+    // the compiler.
+    let main = shape_symbol_labels::add_implicit_labels(&opts, main);
 
     // Ensure the AST contains any degree of parallelism - otherwise, there is no point in using
     // this framework at all.

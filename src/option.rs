@@ -69,6 +69,11 @@ pub struct CompileOptions {
     #[pyo3(get)]
     pub force_float_size: Option<ElemSize>,
 
+    // This option is enabled by default. When enabled, the compiler will implicitly insert labels
+    // into all parallelizable statements corresponding to the shape symbols they use.
+    #[pyo3(get, set)]
+    pub implicit_shape_labels: bool,
+
     /////////////////
     // BUILD FLAGS //
     /////////////////
@@ -92,14 +97,15 @@ impl Default for CompileOptions {
         CompileOptions {
             parallelize: BTreeMap::new(),
             verbose_backend_resolution: false,
+            debug_print: false,
+            write_output: false,
             backend: CompileBackend::Auto,
             use_cuda_thread_block_clusters: false,
             max_thread_blocks_per_cluster: 8,
             use_cuda_graphs: false,
             force_int_size: None,
             force_float_size: None,
-            debug_print: false,
-            write_output: false,
+            implicit_shape_labels: true,
             includes: vec![],
             libs: vec![],
             extra_flags: vec![],

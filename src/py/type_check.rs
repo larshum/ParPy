@@ -8,6 +8,7 @@ use crate::utils::ast::*;
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
+use crate::utils::pprint::PrettyPrint;
 use crate::utils::smap::*;
 
 use itertools::Itertools;
@@ -211,7 +212,9 @@ fn unify_parameter_type(
         Ok((env, ty)) => Ok((env, ty)),
         Err(_) => {
             let vars = env.shape_vars.into_iter()
-                .map(|(id, n)| format!("{id} = {n}"))
+                .map(|(id, n)| {
+                    format!("{} = {n}", TensorShape::Symbol {id}.pprint_default())
+                })
                 .join(", ");
             py_type_error!(i, "Parameter {id} was annotated with type {ty} \
                                which is incompatible with argument type {arg_type}.\n

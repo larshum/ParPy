@@ -12,8 +12,8 @@ pub struct Symbol {
 #[pymethods]
 impl Symbol {
     #[new]
-    fn new(s: String) -> Symbol {
-        Symbol {id: Name::sym_str(&s)}
+    fn new() -> Symbol {
+        Symbol {id: Name::sym_str("")}
     }
 }
 

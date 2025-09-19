@@ -61,7 +61,7 @@ def test_buffer_argument_wrong_element_type(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_parameter_annotation(backend):
     def helper():
-        N = parpy.types.symbol('N')
+        N = parpy.types.symbol()
         @parpy.jit
         def annot_buffer_param(x: parpy.types.buffer(parpy.types.F32, (N,))):
             with parpy.gpu:
@@ -73,7 +73,7 @@ def test_buffer_parameter_annotation(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_annotation_shape_equality(backend):
     def helper():
-        N = parpy.types.symbol('N')
+        N = parpy.types.symbol()
         @parpy.jit
         def annot_add_elemwise_inplace(
             x: parpy.types.buffer(parpy.types.F32, [N]),
@@ -88,33 +88,33 @@ def test_buffer_annotation_shape_equality(backend):
         annot_add_elemwise_inplace(x, y, opts=opts)
         with pytest.raises(TypeError) as e_info:
             annot_add_elemwise_inplace(x, z, opts=opts)
-        assert e_info.match("Parameter y was annotated with type.*[N].*which is incompatible with argument type.*[20].*")
+        assert e_info.match("Parameter y was annotated with type.*[.*].*which is incompatible with argument type.*[20].*")
     run_if_backend_is_enabled(backend, helper)
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_called_function_annotation_shape_constraint(backend):
-    def helper():
-        N = parpy.types.symbol('N')
-        @parpy.jit
-        def annot_add_elemwise_inplace_helper(
-            x: parpy.types.buffer(parpy.types.F32, [N]),
-            y: parpy.types.buffer(parpy.types.F32, [N])
-        ) -> parpy.types.I32:
-            parpy.label('N')
-            x[:] += y[:]
-            return 0
-        @parpy.jit
-        def annot_add_outer(a, b, N):
-            parpy.label('N')
-            for i in range(N):
-                n = annot_add_elemwise_inplace_helper(a[i], b[i])
-        x = np.ndarray((10,10), dtype=np.float32)
-        y = np.ndarray((10,20), dtype=np.float32)
-        opts = par_opts(backend, {'N': parpy.threads(128)})
-        with pytest.raises(TypeError) as e_info:
-            annot_add_outer(x, y, 10, opts=opts)
-        assert e_info.match("Parameter y was annotated with type.*incompatible with.*")
-    run_if_backend_is_enabled(backend, helper)
+    N = parpy.types.symbol()
+
+    @parpy.jit
+    def annot_add_elemwise_inplace_helper(
+        x: parpy.types.buffer(parpy.types.F32, [N]),
+        y: parpy.types.buffer(parpy.types.F32, [N])
+    ) -> parpy.types.I32:
+        parpy.label('N')
+        x[:] += y[:]
+        return 0
+
+    @parpy.jit
+    def annot_add_outer(a, b, N):
+        parpy.label('N')
+        for i in range(N):
+            n = annot_add_elemwise_inplace_helper(a[i], b[i])
+    x = np.ndarray((10,10), dtype=np.float32)
+    y = np.ndarray((10,20), dtype=np.float32)
+    opts = par_opts(backend, {'N': parpy.threads(128)})
+    with pytest.raises(TypeError) as e_info:
+        parpy.print_compiled(annot_add_outer, [x, y, 10], opts)
+    assert e_info.match("Parameter y was annotated with type.*incompatible with.*")
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_called_function_scalar_coercion(backend):
@@ -130,4 +130,28 @@ def test_called_function_scalar_coercion(backend):
         y = np.ndarray((10,), dtype=np.int64)
         opts = par_opts(backend, {'N': parpy.threads(128)})
         calling_func_add_scalars(x, y, opts=opts)
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_shape_implicit_labeling(backend):
+    def helper():
+        import parpy.types as pt
+        N = pt.symbol()
+
+        @parpy.jit
+        def implicit_labels_add_elemwise(x: pt.buffer(pt.F32, [N]), y: pt.buffer(pt.F32, [N])):
+            x[:N] += y[:N]
+
+        x = np.ndarray((128,), dtype=np.float32)
+        y = np.ndarray((128,), dtype=np.float32)
+        opts = par_opts(backend, {'N': parpy.threads(128)})
+        opts.implicit_shape_labels = True
+        implicit_labels_add_elemwise(x, y, opts=opts)
+
+        # If we disable implicit shape labels, the compilation should fail
+        # because there is no parallelism (as no label was inserted).
+        opts.implicit_shape_labels = False
+        with pytest.raises(RuntimeError) as e_info:
+            implicit_labels_add_elemwise(x, y, opts=opts)
+        assert e_info.match(r"The function .* does not contain any parallelism")
     run_if_backend_is_enabled(backend, helper)

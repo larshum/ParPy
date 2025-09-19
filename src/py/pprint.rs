@@ -1,4 +1,5 @@
 use super::ast::*;
+use crate::utils::name::Name;
 use crate::utils::pprint::*;
 
 use std::fmt;
@@ -35,7 +36,10 @@ impl PrettyPrint for TensorShape {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         match self {
             TensorShape::Num {n} => (env, format!("{n}")),
-            TensorShape::Symbol {id} => id.pprint(env),
+            TensorShape::Symbol {id: Name {sym: Some(s), ..}} => {
+                (env, format!("shape<{s}>"))
+            },
+            TensorShape::Symbol {..} => (env, format!("shape<?>"))
         }
     }
 }
