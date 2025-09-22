@@ -103,6 +103,24 @@ fn remainder_if_shared_dimension(
     }
 }
 
+fn thread_idx_dim(dim: Dim, int_ty: &Type, i: &Info) -> Expr {
+    Expr::Convert {
+        e: Box::new(Expr::ThreadIdx {
+            dim, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
+        }),
+        ty: int_ty.clone()
+    }
+}
+
+fn block_idx_dim(dim: Dim, int_ty: &Type, i: &Info) -> Expr {
+    Expr::Convert {
+        e: Box::new(Expr::BlockIdx {
+            dim, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
+        }),
+        ty: int_ty.clone()
+    }
+}
+
 fn determine_loop_bounds(
     par: Option<(LaunchArgs, GpuMap)>,
     var: Name,
@@ -141,7 +159,7 @@ fn determine_loop_bounds(
     match par {
         Some((grid, GpuMap::Thread {n, dim, mult})) => {
             let tot = grid.threads.get_dim(&dim);
-            let idx = Expr::ThreadIdx {dim, ty: int_ty.clone(), i: i.clone()};
+            let idx = thread_idx_dim(dim, &int_ty, &i);
             let rhs = remainder_if_shared_dimension(idx, tot, n, mult);
             let init = Expr::BinOp {
                 lhs: Box::new(init), op: BinOp::Add,
@@ -157,7 +175,7 @@ fn determine_loop_bounds(
         },
         Some((grid, GpuMap::Block {n, dim, mult})) => {
             let tot = grid.blocks.get_dim(&dim);
-            let idx = Expr::BlockIdx {dim, ty: int_ty.clone(), i: i.clone()};
+            let idx = block_idx_dim(dim, &int_ty, &i);
             let rhs = remainder_if_shared_dimension(idx, tot, n, mult);
             let init = Expr::BinOp {
                 lhs: Box::new(init), op: BinOp::Add,
@@ -175,9 +193,7 @@ fn determine_loop_bounds(
             let tot_blocks = grid.blocks.get_dim(&dim);
             let idx = Expr::BinOp {
                 lhs: Box::new(Expr::BinOp {
-                    lhs: Box::new(Expr::BlockIdx {
-                        dim, ty: int_ty.clone(), i: i.clone()
-                    }),
+                    lhs: Box::new(block_idx_dim(dim, &int_ty, &i)),
                     op: BinOp::Mul,
                     rhs: Box::new(Expr::Int {
                         v: nthreads as i128, ty: int_ty.clone(), i: i.clone()
@@ -186,7 +202,7 @@ fn determine_loop_bounds(
                     i: i.clone()
                 }),
                 op: BinOp::Add,
-                rhs: Box::new(Expr::ThreadIdx {dim, ty: int_ty.clone(), i: i.clone()}),
+                rhs: Box::new(thread_idx_dim(dim, &int_ty, &i)),
                 ty: int_ty.clone(),
                 i: i.clone()
             };
@@ -779,7 +795,12 @@ mod test {
         let init = binop(
             int(0, None),
             BinOp::Add,
-            binop(int(1, None), BinOp::Mul, thread_idx(Dim::X), ty.clone()),
+            binop(
+                int(1, None),
+                BinOp::Mul,
+                convert(ty.clone(), thread_idx(Dim::X)),
+                ty.clone()
+            ),
             ty.clone()
         );
         let incr = binop(
@@ -807,9 +828,14 @@ mod test {
         let s = _gen_for(par::LoopPar::default().reduce().threads(2000).unwrap());
         let ty = scalar(ElemSize::I64);
         let idx = binop(
-            binop(block_idx(Dim::X), BinOp::Mul, int(1024, None), ty.clone()),
+            binop(
+                convert(ty.clone(), block_idx(Dim::X)),
+                BinOp::Mul,
+                int(1024, None),
+                ty.clone()
+            ),
             BinOp::Add,
-            thread_idx(Dim::X),
+            convert(ty.clone(), thread_idx(Dim::X)),
             ty.clone()
         );
         let init = binop(int(0, None), BinOp::Add, idx.clone(), ty.clone());

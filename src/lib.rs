@@ -1,5 +1,5 @@
-mod buffer;
 mod cuda;
+mod ext;
 mod gpu;
 mod ir;
 mod metal;
@@ -131,8 +131,10 @@ fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<utils::ast::ElemSize>()?;
     m.add_class::<utils::ast::ScalarSizes>()?;
     m.add_class::<utils::ast::Target>()?;
-    m.add_class::<buffer::DataType>()?;
-    m.add_class::<buffer::ExtType>()?;
+    m.add_class::<ext::buffer::DataType>()?;
+    m.add_class::<ext::types::ExtType>()?;
+    m.add_class::<ext::types::Symbol>()?;
+    m.add_class::<ext::types::TypeVar>()?;
     Ok(())
 }
 

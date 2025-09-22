@@ -213,7 +213,7 @@ def test_invalid_backend_call(backend):
         @parpy.external("_zero", other_backend, parpy.Target.Device)
         def zero() -> types.I32:
             return 0
-        with pytest.raises(RuntimeError) as e_info:
+        with pytest.raises(TypeError) as e_info:
             @parpy.jit
             def f(x):
                 with parpy.gpu:

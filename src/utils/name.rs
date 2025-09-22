@@ -14,8 +14,8 @@ fn gensym() -> Sym {
 
 #[derive(Clone, Debug)]
 pub struct Name {
-    s: String,
-    sym: Option<Sym>
+    pub s: String,
+    pub sym: Option<Sym>
 }
 
 impl Name {
@@ -39,6 +39,10 @@ impl Name {
 
     pub fn get_str<'a>(&'a self) -> &'a String {
         &self.s
+    }
+
+    pub fn get_sym<'a>(&'a self) -> &'a Option<Sym> {
+        &self.sym
     }
 
     pub fn print_with_sym(&self) -> String {

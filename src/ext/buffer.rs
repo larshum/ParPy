@@ -6,12 +6,6 @@ use pyo3::prelude::*;
 use std::collections::BTreeMap;
 use strum_macros::EnumIter;
 
-#[pyclass(eq, frozen)]
-#[derive(Clone, Debug, PartialEq)]
-pub enum ExtType {
-    Pointer(ElemSize),
-}
-
 lazy_static! {
     static ref TYPEMAP: BTreeMap<&'static str, ElemSize> = vec![
         ("b1", ElemSize::Bool),

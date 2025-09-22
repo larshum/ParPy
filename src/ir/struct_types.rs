@@ -129,7 +129,7 @@ mod test {
         let x = "x".to_string();
         let dict_ty = Type::Dict {
             fields: vec![
-                (x.clone(), Type::Tensor {sz: ElemSize::I32, shape: vec![]})
+                (x.clone(), scalar(ElemSize::I32))
             ].into_iter().collect::<BTreeMap<String, Type>>()
         };
         let main = FunDef {

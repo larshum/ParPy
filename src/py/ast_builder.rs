@@ -9,16 +9,20 @@ pub fn tyuk() -> Type {
     Type::Unknown
 }
 
+pub fn fixed_elem_sz(sz: ElemSize) -> TensorElemSize {
+    TensorElemSize::Fixed {sz}
+}
+
 pub fn shape(v: Vec<i64>) -> Type {
-    Type::Tensor {sz: ElemSize::I64, shape: v}
+    let sz = fixed_elem_sz(ElemSize::I64);
+    let shape = v.into_iter()
+        .map(|n| TensorShape::Num {n})
+        .collect::<Vec<TensorShape>>();
+    Type::Tensor {sz, shape}
 }
 
 pub fn scalar(sz: ElemSize) -> Type {
-    Type::Tensor {sz, shape: vec![]}
-}
-
-pub fn pointer(sz: ElemSize) -> Type {
-    Type::Pointer {sz}
+    Type::fixed_scalar(sz)
 }
 
 pub fn dict_ty(fields: Vec<(&str, Type)>) -> Type {
@@ -92,8 +96,12 @@ pub fn tuple(elems: Vec<Expr>) -> Expr {
     Expr::Tuple {elems, ty, i: Info::default()}
 }
 
-pub fn call(f: &str, args: Vec<Expr>, ty: Type) -> Expr {
-    Expr::Call {id: Name::new(f.to_string()), args, ty, i: Info::default()}
+pub fn call(id: Name, args: Vec<Expr>, ty: Type) -> Expr {
+    Expr::Call {id, args, ty, i: Info::default()}
+}
+
+pub fn convert(e: Expr, ty: Type) -> Expr {
+    Expr::Convert {e: Box::new(e), ty}
 }
 
 pub fn assignment(lhs: Expr, rhs: Expr) -> Stmt {

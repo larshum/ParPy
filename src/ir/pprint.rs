@@ -115,7 +115,7 @@ impl PrettyPrint for Stmt {
                 let env = env.decr_indent();
                 let (env, par) = par.pprint(env);
                 let s = format!(
-                    "{0}for (int64_t {1} = {2}; {1} < {3}; {1} += {4}) {{ // {5}\n{6}\n{0}}}",
+                    "{0}for (int64_t {1} = {2}..{3}..{4}) {{ // {5}\n{6}\n{0}}}",
                     indent, var, lo, hi, step, par, body
                 );
                 (env, s)

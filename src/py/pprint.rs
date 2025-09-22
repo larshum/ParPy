@@ -1,4 +1,5 @@
 use super::ast::*;
+use crate::utils::name::Name;
 use crate::utils::pprint::*;
 
 use std::fmt;
@@ -28,30 +29,51 @@ impl PrettyPrint for Builtin {
 }
 
 fn print_scalar(sz: &ElemSize) -> String {
-    match sz {
-        ElemSize::I8 | ElemSize::I16 | ElemSize::I32 | ElemSize::I64 |
-        ElemSize::U8 | ElemSize::U16 | ElemSize::U32 | ElemSize::U64 => "int",
-        ElemSize::F16 | ElemSize::F32 | ElemSize::F64 => "float",
-        ElemSize::Bool => "bool",
-    }.to_string()
+    format!("parpy.types.{sz:?}")
+}
+
+impl PrettyPrint for TensorShape {
+    fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+        match self {
+            TensorShape::Num {n} => (env, format!("{n}")),
+            TensorShape::Symbol {id: Name {sym: Some(s), ..}} => {
+                (env, format!("shape<{s}>"))
+            },
+            TensorShape::Symbol {..} => (env, format!("shape<?>"))
+        }
+    }
+}
+
+impl PrettyPrint for TensorElemSize {
+    fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+        match self {
+            TensorElemSize::Fixed {sz} => (env, print_scalar(&sz)),
+            TensorElemSize::Variable {id: Name {sym: Some(s), ..}} => {
+                (env, format!("var<{s}>"))
+            },
+            TensorElemSize::Variable {..} => (env, format!("var<?>"))
+        }
+    }
 }
 
 impl PrettyPrint for Type {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        let s = match self {
-            Type::String => format!("str"),
-            Type::Tensor {sz, shape} if shape.is_empty() => print_scalar(sz),
-            Type::Tensor {sz, ..} => format!("np.typing.NDArray[{}]", print_scalar(sz)),
-            Type::Pointer {..} => format!("Any"),
-            Type::Tuple {elems} => {
-                let (_, s) = pprint_iter(elems.iter(), env.clone(), ", ");
-                format!("tuple[{s}]")
+        match self {
+            Type::String => (env, format!("str")),
+            Type::Tensor {sz, shape} if shape.is_empty() => sz.pprint(env),
+            Type::Tensor {sz, shape} => {
+                let (_, s) = pprint_iter(shape.iter(), env.clone(), ", ");
+                let (env, sz) = sz.pprint(env);
+                (env, format!("parpy.types.buffer({sz}, [{s}])"))
             },
-            Type::Dict {..} => format!("dict[str, Any]"),
-            Type::Void => format!("()"),
-            Type::Unknown => format!("Any")
-        };
-        (env, s.to_string())
+            Type::Tuple {elems} => {
+                let (env, s) = pprint_iter(elems.iter(), env.clone(), ", ");
+                (env, format!("tuple[{s}]"))
+            },
+            Type::Dict {..} => (env, format!("dict[str, Any]")),
+            Type::Void => (env, format!("()")),
+            Type::Unknown => (env, format!("Any"))
+        }
     }
 }
 
@@ -159,6 +181,18 @@ impl PrettyPrint for BinOp {
     }
 }
 
+impl PrettyPrint for ReduceOp {
+    fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+        let s = match self {
+            ReduceOp::Max => format!("max"),
+            ReduceOp::Min => format!("min"),
+            ReduceOp::Sum => format!("sum"),
+            ReduceOp::Prod => format!("prod"),
+        };
+        (env, s)
+    }
+}
+
 impl PrettyPrint for Expr {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         match self {
@@ -171,6 +205,11 @@ impl PrettyPrint for Expr {
             Expr::Float {v, ..} => (env, format!("{v:?}")),
             Expr::UnOp {..} => self.print_parenthesized_unop(env),
             Expr::BinOp {..} => self.print_parenthesized_binop(env),
+            Expr::ReduceOp {op, arg, ..} => {
+                let (env, op) = op.pprint(env);
+                let (env, arg) = arg.pprint(env);
+                (env, format!("reduce({op}, {arg})"))
+            },
             Expr::IfExpr {cond, thn, els, ..} => {
                 let (env, cond) = cond.pprint(env);
                 let (env, thn) = thn.pprint(env);
@@ -199,11 +238,6 @@ impl PrettyPrint for Expr {
                 let (env, id) = id.pprint(env);
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
-            },
-            Expr::NeutralElement {op, tyof, ..} => {
-                let (env, op) = op.pprint(env);
-                let (env, tyof) = tyof.pprint(env);
-                (env, format!("neutral_element<{op}, {tyof}>"))
             },
             Expr::Builtin {func, args, ..} => {
                 let (env, func) = func.pprint(env);
@@ -333,11 +367,29 @@ impl PrettyPrint for Ast {
         let Ast {tops, main} = self;
         let (env, tops) = pprint_iter(tops.iter(), env, "\n");
         let (env, main) = main.pprint(env);
-        (env, format!("import numpy as np\n{tops}\n{main}"))
+        (env, format!("import parpy.types\n{tops}\n{main}"))
+    }
+}
+
+impl fmt::Display for TensorShape {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.pprint_default())
+    }
+}
+
+impl fmt::Display for TensorElemSize {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.pprint_default())
     }
 }
 
 impl fmt::Display for Builtin {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.pprint_default())
+    }
+}
+
+impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.pprint_default())
     }
@@ -360,32 +412,57 @@ mod test {
     use super::*;
     use crate::test::*;
     use crate::py::ast_builder::*;
+    use crate::utils::name::Name;
 
     #[test]
     fn print_scalar_int_type() {
-        assert_eq!(scalar(ElemSize::I32).pprint_default(), "int");
+        assert_eq!(scalar(ElemSize::I32).pprint_default(), "parpy.types.I32");
     }
 
     #[test]
     fn print_scalar_float_type() {
-        assert_eq!(scalar(ElemSize::F16).pprint_default(), "float");
+        assert_eq!(scalar(ElemSize::F16).pprint_default(), "parpy.types.F16");
     }
 
     #[test]
     fn print_scalar_bool_type() {
-        assert_eq!(scalar(ElemSize::Bool).pprint_default(), "bool");
+        assert_eq!(scalar(ElemSize::Bool).pprint_default(), "parpy.types.Bool");
     }
 
     #[test]
     fn print_1d_tensor_type() {
-        let ty = Type::Tensor {sz: ElemSize::I16, shape: vec![10]};
-        assert_eq!(ty.pprint_default(), "np.typing.NDArray[int]");
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::I16),
+            shape: vec![TensorShape::Num {n: 10}]
+        };
+        assert_eq!(ty.pprint_default(), "parpy.types.buffer(parpy.types.I16, [10])");
     }
 
     #[test]
     fn print_2d_tensor_type() {
-        let ty = Type::Tensor {sz: ElemSize::U8, shape: vec![10, 20]};
-        assert_eq!(ty.pprint_default(), "np.typing.NDArray[int]");
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::U8),
+            shape: vec![
+                TensorShape::Num {n: 10},
+                TensorShape::Num {n: 20}
+            ]
+        };
+        assert_eq!(ty.pprint_default(), "parpy.types.buffer(parpy.types.U8, [10, 20])");
+    }
+
+    #[test]
+    fn print_shape_var_tensor_type() {
+        let id = Name::sym_str("N");
+        let s = id.sym.clone();
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::F32),
+            shape: vec![TensorShape::Symbol {id}]
+        };
+        let expected = format!(
+            "parpy.types.buffer(parpy.types.F32, [shape<{}>])",
+            s.map(|i| i.to_string()).unwrap_or("?".to_string())
+        );
+        assert_eq!(ty.pprint_default(), expected);
     }
 
     #[test]
@@ -395,7 +472,7 @@ mod test {
             scalar(ElemSize::U32),
             scalar(ElemSize::F64)
         ]};
-        assert_eq!(ty.pprint_default(), "tuple[int, int, float]");
+        assert_eq!(ty.pprint_default(), "tuple[parpy.types.I16, parpy.types.U32, parpy.types.F64]");
     }
 
     #[test]
@@ -579,7 +656,7 @@ mod test {
             res_ty: scalar(ElemSize::F32),
             i: i()
         };
-        let expected = "def f(x: float, y: int) -> float:\n  return x + float(y)";
+        let expected = "def f(x: parpy.types.F32, y: parpy.types.I32) -> parpy.types.F32:\n  return x + parpy.types.F32(y)";
         assert_eq!(def.pprint_default(), expected);
     }
 }

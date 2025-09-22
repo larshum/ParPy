@@ -1,17 +1,20 @@
 use super::ast::*;
 use crate::py_name_error;
+use crate::ext::types::Symbol;
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::smap::SMapAccum;
 
-use std::collections::BTreeMap;
-
 use pyo3::prelude::*;
+use pyo3::types::{PyCapsule, PyDict};
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug)]
 pub struct SymbolizeEnv {
     vars: BTreeMap<String, Name>,
+    shape_vars: BTreeSet<Name>,
+    symbols: BTreeMap<String, Symbol>,
     i: Info
 }
 
@@ -28,6 +31,16 @@ impl SymbolizeEnv {
         } else {
             if let Some(n) = self.vars.get(id.get_str()) {
                 Ok(n.clone())
+            } else if let Some(sym) = self.symbols.get(id.get_str()) {
+                // We construct a custom name containing a string value corresponding to the name
+                // to which the symbol is bound in Python, but using the symbol value of the inner
+                // symbol.
+                let id = Name {s: id.s.clone(), sym: sym.id.sym};
+                if self.shape_vars.contains(&id) {
+                    Ok(id)
+                } else {
+                    py_name_error!(self.i, "Found reference to unused shape variable {id}")
+                }
             } else {
                 py_name_error!(self.i, "Found reference to unknown variable {id}")
             }
@@ -35,13 +48,13 @@ impl SymbolizeEnv {
     }
 
     pub fn set_symbol(mut self, id: Name) -> (Self, Name) {
-        if id.has_sym() {
-            (self, id)
+        let id = if id.has_sym() {
+            id
         } else {
-            let id = id.with_new_sym();
-            self.vars.insert(id.get_str().clone(), id.clone());
-            (self, id)
-        }
+            id.with_new_sym()
+        };
+        self.vars.insert(id.get_str().clone(), id.clone());
+        (self, id)
     }
 
     pub fn set_info(self, i: Info) -> Self {
@@ -49,19 +62,8 @@ impl SymbolizeEnv {
     }
 }
 
-impl Default for SymbolizeEnv {
-    fn default() -> Self {
-        SymbolizeEnv {vars: BTreeMap::new(), i: Info::default()}
-    }
-}
-
 pub trait Symbolize {
     fn symbolize(self, env: SymbolizeEnv) -> SymbolizeResult<Self> where Self: Sized;
-
-    fn symbolize_default(self) -> PyResult<Self> where Self: Sized {
-        let (_, s) = self.symbolize(SymbolizeEnv::default())?;
-        Ok(s)
-    }
 }
 
 impl <'a, T: Symbolize + 'a> Symbolize for Vec<T> {
@@ -76,6 +78,30 @@ impl <'a, T: Symbolize + 'a> Symbolize for Vec<T> {
     }
 }
 
+impl Symbolize for TensorShape {
+    fn symbolize(self, mut env: SymbolizeEnv) -> SymbolizeResult<TensorShape> {
+        match self {
+            TensorShape::Num {..} => Ok((env, self)),
+            TensorShape::Symbol {id} => {
+                env.shape_vars.insert(id.clone());
+                Ok((env, TensorShape::Symbol {id}))
+            }
+        }
+    }
+}
+
+impl Symbolize for Type {
+    fn symbolize(self, env: SymbolizeEnv) -> SymbolizeResult<Type> {
+        match self {
+            Type::Tensor {sz, shape} => {
+                let (env, shape) = shape.symbolize(env)?;
+                Ok((env, Type::Tensor {sz, shape}))
+            },
+            _ => self.smap_accum_l_result(Ok(env), |env, ty| ty.symbolize(env))
+        }
+    }
+}
+
 impl Symbolize for Expr {
     fn symbolize(self, env: SymbolizeEnv) -> SymbolizeResult<Expr> {
         let env = env.set_info(self.get_info());
@@ -84,11 +110,20 @@ impl Symbolize for Expr {
                 let id = env.get_symbol(id)?;
                 Ok((env, Expr::Var {id, ty, i}))
             },
+            Expr::Call {id, args, ty, i} => {
+                let id = env.get_symbol(id)?;
+                let (env, args) = args.symbolize(env)?;
+                Ok((env, Expr::Call {id, args, ty, i}))
+            },
+            Expr::Convert {e, ty} => {
+                let (env, e) = e.symbolize(env)?;
+                let (env, ty) = ty.symbolize(env)?;
+                Ok((env, Expr::Convert {e: Box::new(e), ty}))
+            },
             Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-            Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-            Expr::Tuple {..} | Expr::Call {..} | Expr::NeutralElement {..} |
-            Expr::Builtin {..} | Expr::Convert {..} => {
+            Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
+            Expr::Slice {..} | Expr::Tuple {..} | Expr::Builtin {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }
@@ -127,8 +162,13 @@ impl Symbolize for Stmt {
                 let (_, body) = body.symbolize(body_env)?;
                 Ok((env, Stmt::For {var, lo, hi, step, body, labels, i}))
             },
+            Stmt::Call {func, args, i} => {
+                let func = env.get_symbol(func)?;
+                let (env, args) = args.symbolize(env)?;
+                Ok((env, Stmt::Call {func, args, i}))
+            },
             Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-            Stmt::WithGpuContext {..} | Stmt::Call {..} | Stmt::Label {..} => {
+            Stmt::WithGpuContext {..} | Stmt::Label {..} => {
                 let (env, s) = self.smap_accum_l_result(Ok(env), |env, e: Expr| e.symbolize(env))?;
                 s.smap_accum_l_result(Ok(env), |env, s: Stmt| s.symbolize(env))
             }
@@ -140,6 +180,7 @@ impl Symbolize for Param {
     fn symbolize(self, env: SymbolizeEnv) -> SymbolizeResult<Param> {
         let Param {id, ty, i} = self;
         let (env, id) = env.set_symbol(id);
+        let (env, ty) = ty.symbolize(env)?;
         Ok((env, Param {id, ty, i}))
     }
 }
@@ -154,22 +195,80 @@ impl Symbolize for FunDef {
     }
 }
 
+fn extract_top_name<'py>(t: Bound<'py, PyCapsule>) -> Name {
+    let t: &Top = unsafe { t.reference() };
+    match t {
+        Top::ExtDecl {id, ..} | Top::FunDef {v: FunDef {id, ..}} => id.clone()
+    }
+}
+
+fn try_extract_symbol<'py>(
+    mut acc: BTreeMap<String, Symbol>,
+    entry: (Bound<'py, PyAny>, Bound<'py, PyAny>)
+) -> BTreeMap<String, Symbol> {
+    let (key, value) = entry;
+    match value.extract::<Symbol>() {
+        Ok(v) => {
+            acc.insert(key.extract::<String>().unwrap(), v);
+            acc
+        },
+        Err(_) => acc
+    }
+}
+
+fn extract_symbols<'py>(
+    vars: &(Bound<'py, PyDict>, Bound<'py, PyDict>)
+) -> BTreeMap<String, Symbol> {
+    let (globals, locals) = vars;
+    globals.iter()
+        .chain(locals.iter())
+        .fold(BTreeMap::new(), try_extract_symbol)
+
+}
+
+pub fn with_tops<'py>(
+    tops: &BTreeMap<String, Bound<'py, PyCapsule>>,
+    vars: &(Bound<'py, PyDict>, Bound<'py, PyDict>),
+    def: FunDef
+) -> PyResult<FunDef> {
+    let symbols = extract_symbols(vars);
+    let vars = tops.clone()
+        .into_iter()
+        .map(|(id, cap)| (id, extract_top_name(cap)))
+        .collect::<BTreeMap<String, Name>>();
+    let env = SymbolizeEnv {
+        vars,
+        shape_vars: BTreeSet::new(),
+        symbols,
+        i: def.i.clone()
+    };
+    let (_, def) = def.symbolize(env)?;
+    Ok(def)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::test::*;
+    use crate::ext::types;
     use crate::py::ast_builder::*;
 
     fn sym_env(entries: Vec<Name>) -> SymbolizeEnv {
         let vars = entries.into_iter()
             .map(|id| (id.get_str().clone(), id))
             .collect::<BTreeMap<String, Name>>();
-        SymbolizeEnv {vars, i: Info::default()}
+        SymbolizeEnv {
+            vars,
+            shape_vars: BTreeSet::new(),
+            symbols: BTreeMap::new(),
+            i: Info::default()
+        }
     }
 
     fn nvar(id: &Name) -> Expr {
         Expr::Var {
-            id: id.clone(), ty: Type::Tensor {sz: ElemSize::Bool, shape: vec![]},
+            id: id.clone(),
+            ty: scalar(ElemSize::Bool),
             i: Info::default()
         }
     }
@@ -215,7 +314,9 @@ mod test {
 
     #[test]
     fn symbolize_unknown_var_fail() {
-        assert_py_error_matches(var("x", Type::Unknown).symbolize_default(), "unknown variable");
+        let e = var("x", Type::Unknown);
+        let env = sym_env(vec![]);
+        assert_py_error_matches(e.symbolize(env), "unknown variable");
     }
 
     #[test]
@@ -297,5 +398,61 @@ mod test {
         } else {
             assert!(false);
         }
+    }
+
+    #[test]
+    fn symbolize_fun_def_with_shape_symbol_annot() -> Result<(), ()> {
+        let n = Name::sym_str("");
+        let param = Param {
+            id: id("x"),
+            ty: Type::Tensor {
+                sz: fixed_elem_sz(ElemSize::I32),
+                shape: vec![TensorShape::Symbol {id: n.clone()}]
+            },
+            i: i()
+        };
+        let def = FunDef {
+            id: id("f"),
+            params: vec![param],
+            body: vec![
+                assignment(var("y", tyuk()),
+                Expr::Var {id: id("N"), ty: tyuk(), i: i()})
+            ],
+            res_ty: Type::Void,
+            i: i()
+        };
+        let mut env = sym_env(vec![]);
+        env.symbols.insert("N".to_string(), types::Symbol {id: n});
+        let (_, FunDef {id, mut params, mut body, ..}) = def.symbolize(env).unwrap();
+        assert!(id.has_sym());
+        let Param {id, ty, ..} = params.pop().unwrap();
+        assert!(id.has_sym());
+        let shape_id = if let Type::Tensor {mut shape, ..} = ty {
+            if let TensorShape::Symbol {id} = shape.pop().unwrap() {
+                assert!(id.has_sym());
+                Ok(id)
+            } else {
+                Err(())
+            }
+        } else {
+            Err(())
+        }?;
+        if let Stmt::Definition {expr, ..} = body.pop().unwrap() {
+            if let Expr::Var {id, ..} = expr {
+                assert_eq!(id, shape_id);
+            }
+        } else {
+            assert!(false);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn symbolize_undefined_shape_variable() {
+        let n = Name::sym_str("");
+        let mut env = sym_env(vec![]);
+        env.symbols.insert("N".to_string(), types::Symbol {id: n.clone()});
+        let e = Expr::Var {id: id("N"), ty: tyuk(), i: i()};
+        assert_py_error_matches(e.symbolize(env), "Found reference to unused shape variable N");
     }
 }

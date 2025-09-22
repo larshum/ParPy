@@ -1,4 +1,4 @@
-from .parpy import ElemSize, ExtType
+from .parpy import ElemSize
 
 Bool = ElemSize.Bool
 I8 = ElemSize.I8
@@ -13,8 +13,17 @@ F16 = ElemSize.F16
 F32 = ElemSize.F32
 F64 = ElemSize.F64
 
-def pointer(ty):
-    if isinstance(ty, ElemSize):
-        return ExtType.Pointer(ty)
+def buffer(sz, shape):
+    from .parpy import ExtType
+    if isinstance(sz, ElemSize):
+        return ExtType.Buffer(sz, shape)
     else:
-        raise RuntimeError(f"Provided type {ty} must be an ExtType.")
+        return ExtType.VarBuffer(sz, shape)
+
+def symbol():
+    from .parpy import Symbol
+    return Symbol()
+
+def type_var():
+    from .parpy import TypeVar
+    return TypeVar()

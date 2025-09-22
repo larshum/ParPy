@@ -1,5 +1,6 @@
 use super::ast::*;
 use crate::py_runtime_error;
+use crate::ext::types::{ExtType, TypeVar};
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
@@ -223,7 +224,7 @@ fn lookup_builtin_expr<'py, 'a>(
     i: &Info
 ) -> PyResult<Expr> {
     let func = lookup_builtin(expr, env, &i)?;
-    Ok(Expr::Builtin {func, args: vec![], axis: None, ty: Type::Unknown, i: i.clone()})
+    Ok(Expr::Builtin {func, args: vec![], ty: Type::Unknown, i: i.clone()})
 }
 
 fn try_extract_type_annotation<'py, 'a>(
@@ -231,101 +232,44 @@ fn try_extract_type_annotation<'py, 'a>(
     env: &ConvertEnv<'py, 'a>,
     i: &Info
 ) -> PyResult<Type> {
+    let fail = || py_runtime_error!(i, "Unsupported parameter type annotation");
     let py = annot.py();
-    let parpy = py.import("parpy")?;
-    let parpy_tys = parpy.getattr("types")?;
-    let as_ptr_ty = |sz: Bound<'py, PyAny>| parpy_tys.call_method1("pointer", (sz,));
     match eval_node(&annot, &env, py) {
-        Ok(ty) => {
-            if ty.eq(parpy_tys.getattr("Bool")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::Bool})
-            } else if ty.eq(parpy_tys.getattr("I8")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I8})
-            } else if ty.eq(parpy_tys.getattr("I16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I16})
-            } else if ty.eq(parpy_tys.getattr("I32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I32})
-            } else if ty.eq(parpy_tys.getattr("I64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::I64})
-            } else if ty.eq(parpy_tys.getattr("U8")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U8})
-            } else if ty.eq(parpy_tys.getattr("U16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U16})
-            } else if ty.eq(parpy_tys.getattr("U32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U32})
-            } else if ty.eq(parpy_tys.getattr("U64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::U64})
-            } else if ty.eq(parpy_tys.getattr("F16")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F16})
-            } else if ty.eq(parpy_tys.getattr("F32")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F32})
-            } else if ty.eq(parpy_tys.getattr("F64")?)? {
-                Ok(Type::Tensor {shape: vec![], sz: ElemSize::F64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("Bool")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::Bool})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I8")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I8})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("I64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::I64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U8")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U8})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("U64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::U64})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F16")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F16})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F32")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F32})
-            } else if ty.eq(as_ptr_ty(parpy_tys.getattr("F64")?)?)? {
-                Ok(Type::Pointer {sz: ElemSize::F64})
-            } else {
-                py_runtime_error!(i, "Unsupported parameter type annotation")
+        Ok(ty) => match ty.extract::<ElemSize>() {
+            Ok(sz) => Ok(Type::fixed_scalar(sz)),
+            Err(_) => match ty.extract::<TypeVar>() {
+                Ok(var) => {
+                    let sz = TensorElemSize::Variable {id: var.id};
+                    Ok(Type::Tensor {sz, shape: vec![]})
+                },
+                Err(_) => match ty.extract::<ExtType>() {
+                    Ok(ExtType::Buffer(sz, syms)) => {
+                        let sz = TensorElemSize::Fixed {sz};
+                        let shape = syms.into_iter()
+                            .map(|sym| TensorShape::Symbol {id: sym.id})
+                            .collect::<Vec<TensorShape>>();
+                        Ok(Type::Tensor {sz, shape})
+                    },
+                    Ok(ExtType::VarBuffer(tyvar, syms)) => {
+                        let sz = TensorElemSize::Variable {id: tyvar.id};
+                        let shape = syms.into_iter()
+                            .map(|sym| TensorShape::Symbol {id: sym.id})
+                            .collect::<Vec<TensorShape>>();
+                        Ok(Type::Tensor {sz, shape})
+                    },
+                    Err(_) => fail()
+                }
             }
         },
-        Err(_) => py_runtime_error!(i, "Unsupported parameter type annotation")
+        Err(_) => fail()
     }
 }
 
-fn extract_integer_literal_value(e: Expr) -> Option<i64> {
-    match e {
-        Expr::Int {v, ..} => Some(v as i64),
-        Expr::UnOp {op: UnOp::Sub, arg, ..} => match *arg {
-            Expr::Int {v, ..} => Some(-v as i64),
-            _ => None
-        },
-        _ => None
-    }
-}
-
-/// Currently, the only supported keyword argument is the 'axis' keyword, used to determine which
-/// axis should be reduced in the supported reduction builtins. If any other keyword arguments are
-/// provided, we report an error.
-fn extract_axis_kwarg<'py, 'a>(
-    acc: PyResult<Option<i64>>,
-    kw: Bound<'py, PyAny>,
-    i: &Info,
-    env: &ConvertEnv<'py, 'a>
-) -> PyResult<Option<i64>> {
-    let kw_str = kw.getattr("arg")?.extract::<String>()?;
-    match acc? {
-        None if kw_str == "axis" => {
-            let kw_val = kw.getattr("value")?;
-            match extract_integer_literal_value(convert_expr(kw_val, env)?) {
-                Some(v) => Ok(Some(v)),
-                None => py_runtime_error!(i, "Expected integer literal value \
-                                              for 'axis' keyword argument")
-            }
-        },
-        None | Some(_) => {
-            py_runtime_error!(i, "Unsupported keyword argument in call: {kw_str}")
-        }
+fn ensure_no_keyword_arguments<'py>(e: &Bound<'py, PyAny>, i: &Info) -> PyResult<()> {
+    if e.getattr("keywords")?.try_iter()?.count() > 0 {
+        py_runtime_error!(i, "Keyword arguments are not supported in call nodes")
+    } else {
+        Ok(())
     }
 }
 
@@ -430,23 +374,17 @@ fn convert_expr<'py, 'a>(
             .try_iter()?
             .map(|arg| convert_expr(arg?, env))
             .collect::<PyResult<Vec<Expr>>>()?;
-        let axis = expr.getattr("keywords")?
-            .try_iter()?
-            .fold(Ok(None), |acc, kw| extract_axis_kwarg(acc, kw?, &i, env))?;
+        ensure_no_keyword_arguments(&expr, &i)?;
         match convert_expr(expr.getattr("func")?, env)? {
             Expr::Var {id, ..} => {
                 if env.tops.contains_key(&id.to_string()) {
-                    if axis.is_none() {
-                        Ok(Expr::Call {id, args, ty, i})
-                    } else {
-                        py_runtime_error!(i, "Unsupported keyword argument in call: axis")
-                    }
+                    Ok(Expr::Call {id, args, ty, i})
                 } else {
                     py_runtime_error!(i, "Call to unknown function {0}", id.to_string())
                 }
             },
             Expr::Builtin {func, args: a, ..} if a.len() == 0 => {
-                Ok(Expr::Builtin {func, args, axis, ty, i})
+                Ok(Expr::Builtin {func, args, ty, i})
             },
             _ => py_runtime_error!(i, "Unsupported call target type")
         }
@@ -497,7 +435,7 @@ fn construct_expr_stmt(
             Ok(Stmt::Label {label, i: i.clone()})
         },
         Expr::Call {id, args, ..} => {
-            Ok(Stmt::Call {func: id.to_string(), args, i: i.clone()})
+            Ok(Stmt::Call {func: id, args, i: i.clone()})
         },
         _ => py_runtime_error!(i, "Unsupported expression statement")
     }
@@ -663,7 +601,7 @@ fn convert_stmts<'py, 'a>(
         .collect::<PyResult<Vec<Stmt>>>()
 }
 
-fn convert_arg<'py, 'a>(
+fn convert_param<'py, 'a>(
     arg: Bound<'py, PyAny>,
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<Param> {
@@ -678,12 +616,12 @@ fn convert_arg<'py, 'a>(
     Ok(Param {id, ty, i})
 }
 
-fn convert_args<'py, 'a>(
+fn convert_params<'py, 'a>(
     body: &Bound<'py, PyAny>,
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<Vec<Param>> {
     body.getattr("args")?.getattr("args")?.try_iter()?
-        .map(|arg| convert_arg(arg?, env))
+        .map(|arg| convert_param(arg?, env))
         .collect::<PyResult<Vec<Param>>>()
 }
 
@@ -692,7 +630,7 @@ fn convert_fun_def<'py, 'a>(
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<FunDef> {
     let body = ast.getattr("body")?.get_item(0)?;
-    let params = convert_args(&body, env)?;
+    let params = convert_params(&body, env)?;
     let id = Name::new(body.getattr("name")?.extract::<String>()?);
     let ir_body = convert_stmts(body.getattr("body")?, &env)?;
     let i = merge_body_infos(&ir_body);
@@ -762,7 +700,7 @@ pub fn convert_external<'py>(
     };
     let body = ast.getattr("body")?.get_item(0)?;
     let i = extract_info(&body, &env);
-    let params = convert_args(&body, &env)?;
+    let params = convert_params(&body, &env)?;
     let id = Name::new(body.getattr("name")?.extract::<String>()?);
     assert_known_param_types(&params)?;
     let res_ty = convert_returns(body, &env, &i)?;
@@ -774,8 +712,6 @@ mod test {
     use super::*;
     use crate::test::*;
     use crate::py::ast_builder::*;
-
-    use strum::IntoEnumIterator;
 
     fn make_env<'py, 'a>(
         py: Python<'py>,
@@ -1411,14 +1347,13 @@ mod test {
                 ty: Type::Unknown,
                 i: mkinfo(1, 14, 1, 17)
             }],
-            axis: None,
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 18)
         });
     }
 
     #[test]
-    fn convert_expr_sum_no_axis() {
+    fn convert_expr_sum() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:])").unwrap();
         assert_eq!(e, Expr::Builtin {
             func: Builtin::Sum,
@@ -1434,48 +1369,21 @@ mod test {
                 ty: Type::Unknown,
                 i: mkinfo(1, 12, 1, 17)
             }],
-            axis: None,
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 17)
         });
     }
 
     #[test]
-    fn convert_expr_sum_axis() {
-        let e = convert_expr_wrap("parpy.operators.sum(x[:,:], axis=1)").unwrap();
-        assert_eq!(e, Expr::Builtin {
-            func: Builtin::Sum,
-            args: vec![Expr::Subscript {
-                target: Box::new(Expr::Var {
-                    id: id("x"),
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 12, 1, 13)
-                }),
-                idx: Box::new(Expr::Tuple {
-                    elems: vec![
-                        Expr::Slice {
-                            lo: None, hi: None, ty: Type::Unknown, i: mkinfo(1, 14, 1, 15)
-                        },
-                        Expr::Slice {
-                            lo: None, hi: None, ty: Type::Unknown, i: mkinfo(1, 16, 1, 17)
-                        }
-                    ],
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 14, 1, 17)
-                }),
-                ty: Type::Unknown,
-                i: mkinfo(1, 12, 1, 18)
-            }],
-            axis: Some(1),
-            ty: Type::Unknown,
-            i: mkinfo(1, 0, 1, 27)
-        });
+    fn convert_expr_sum_kwarg() {
+        let e = convert_expr_wrap("parpy.operators.sum(x[:,:], axis=1)");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
     fn convert_expr_sum_invalid_axis_form() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:], axis='x')");
-        assert_py_error_matches(e, r"Expected integer literal value.*");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
@@ -1520,13 +1428,13 @@ mod test {
     #[test]
     fn convert_expr_call_keyword_args() {
         let e = convert_expr_wrap_helper("f(2, y=3)", vec!["f".to_string()]);
-        assert_py_error_matches(e, r"Unsupported keyword argument in call.*y");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     #[test]
     fn convert_expr_call_axis_keyword_arg() {
         let e = convert_expr_wrap_helper("f(2, axis=3)", vec!["f".to_string()]);
-        assert_py_error_matches(e, r"Unsupported keyword argument in call.*axis");
+        assert_py_error_matches(e, "Keyword arguments are not supported.*");
     }
 
     fn convert_stmt_wrap(s: &str) -> PyResult<Stmt> {
@@ -1836,7 +1744,7 @@ mod test {
         assert!(res.is_err());
     }
 
-    fn convert_arg_type_annot(annot: &str) -> PyResult<Type> {
+    fn convert_param_type_annot(annot: &str) -> PyResult<Type> {
         let s = format!("def f(x: {annot}):\n  return x");
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
@@ -1852,24 +1760,9 @@ mod test {
     }
 
     #[test]
-    fn try_extract_scalar_type_annot() -> PyResult<()> {
-        for sz in ElemSize::iter() {
-            let id = format!("parpy.types.{:?}", sz);
-            assert_eq!(convert_arg_type_annot(&id)?, scalar(sz));
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn try_extract_pointer_type_annot() {
-        let ty = convert_arg_type_annot("parpy.types.pointer(parpy.types.I8)").unwrap();
-        assert_eq!(ty, Type::Pointer {sz: ElemSize::I8});
-    }
-
-    #[test]
     fn try_extract_int_type_annot() {
         assert_py_error_matches(
-            convert_arg_type_annot("int"),
+            convert_param_type_annot("int"),
             "Unsupported parameter type annotation"
         )
     }

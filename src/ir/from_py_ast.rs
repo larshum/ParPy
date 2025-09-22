@@ -46,6 +46,19 @@ pub fn to_struct_def(
     Ok(Top::StructDef {id, fields, i: Info::default()})
 }
 
+fn to_ir_elem_size(
+    sz: py_ast::TensorElemSize,
+    i: &Info
+) -> CompileResult<ElemSize> {
+    match sz {
+        py_ast::TensorElemSize::Fixed {sz} => Ok(sz),
+        py_ast::TensorElemSize::Variable {id} => {
+            parpy_compile_error!(i, "Encountered unresolved type variable {id} \
+                                     when translating to IR AST")
+        }
+    }
+}
+
 fn to_ir_type(
     env: &IREnv,
     i: &Info,
@@ -55,9 +68,16 @@ fn to_ir_type(
         py_ast::Type::String => {
             parpy_compile_error!(i, "Encountered standalone string type when translating to IR AST")
         },
-        py_ast::Type::Tensor {sz, shape} => Ok(Type::Tensor {sz, shape}),
-        py_ast::Type::Pointer {sz} => {
-            Ok(Type::Pointer {ty: Box::new(Type::Tensor {sz, shape: vec![]})})
+        py_ast::Type::Tensor {sz, shape} => {
+            let shape = shape.into_iter()
+                .map(|sh| sh.extract_num())
+                .collect::<Option<Vec<i64>>>();
+            let sz = to_ir_elem_size(sz, &i)?;
+            match shape {
+                Some(sh) => Ok(Type::Tensor {sz, shape: sh}),
+                None => parpy_compile_error!(i, "Encountered unresolved shape \
+                                                 symbol when translating to IR AST")
+            }
         },
         py_ast::Type::Tuple {..} => {
             parpy_compile_error!(i, "Encountered standalone tuple type when translating to IR AST")
@@ -252,6 +272,9 @@ fn to_ir_expr(
             let ty = to_ir_type(env, &i, ty)?;
             Ok(Expr::BinOp {lhs, op, rhs, ty, i})
         },
+        py_ast::Expr::ReduceOp {i, ..} => {
+            parpy_internal_error!(i, "Intermediate reduction node remaining during IR translation")
+        },
         py_ast::Expr::IfExpr {cond, thn, els, ty, i} => {
             let cond = Box::new(to_ir_expr(env, *cond)?);
             let thn = Box::new(to_ir_expr(env, *thn)?);
@@ -319,9 +342,6 @@ fn to_ir_expr(
             let par = lookup_external_parallelism(env, &id)
                 .unwrap_or(LoopPar::default());
             Ok(Expr::Call {id, args, par, ty, i})
-        },
-        py_ast::Expr::NeutralElement {i, ..} => {
-            parpy_internal_error!(i, "Intermediate reduction node remaining during IR translation")
         },
         py_ast::Expr::Builtin {func, args, ty, i, ..} => {
             let args = args.into_iter()
@@ -770,16 +790,6 @@ mod test {
     fn tuple_expr_to_ir() {
         let r = to_ir_expr(&ir_env(), py::tuple(vec![]));
         assert_error_matches(r, r"compile error.*Tuples are not allowed outside");
-    }
-
-    #[test]
-    fn neutral_element_expr_to_ir() {
-        let ne = py_ast::Expr::NeutralElement {
-            op: BinOp::Add, tyof: Box::new(py::int(1, Some(ElemSize::I64))),
-            i: Info::default()
-        };
-        let r = to_ir_expr(&ir_env(), ne);
-        assert_error_matches(r, r"Internal.*Intermediate reduction node");
     }
 
     fn make_par_map(v: Vec<(&str, LoopPar)>) -> BTreeMap<String, LoopPar> {

@@ -13,11 +13,37 @@ pub use crate::utils::ast::BinOp;
 pub use crate::utils::ast::Target;
 pub use crate::par::LoopPar;
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
+pub enum TensorShape {
+    Num {n: i64},
+    Symbol {id: Name},
+}
+
+impl TensorShape {
+    pub fn extract_num(&self) -> Option<i64> {
+        match self {
+            TensorShape::Num {n} => Some(*n),
+            TensorShape::Symbol {..} => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
+pub enum TensorElemSize {
+    Fixed {sz: ElemSize},
+    Variable {id: Name},
+}
+
+impl Default for TensorElemSize {
+    fn default() -> Self {
+        TensorElemSize::Fixed {sz: ElemSize::default()}
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum Type {
     String,
-    Tensor {sz: ElemSize, shape: Vec<i64>},
-    Pointer {sz: ElemSize},
+    Tensor {sz: TensorElemSize, shape: Vec<TensorShape>},
     Tuple {elems: Vec<Type>},
     Dict {fields: BTreeMap<String, Type>},
     Void,
@@ -27,8 +53,40 @@ pub enum Type {
 impl Type {
     pub fn get_scalar_elem_size<'a>(&'a self) -> Option<&'a ElemSize> {
         match self {
-            Type::Tensor {sz, shape} if shape.is_empty() => Some(sz),
+            Type::Tensor {sz, shape} if shape.is_empty() => match sz {
+                TensorElemSize::Fixed {sz} => Some(sz),
+                TensorElemSize::Variable {..} => None
+            },
             _ => None
+        }
+    }
+
+    pub fn fixed_scalar(sz: ElemSize) -> Type {
+        Type::Tensor {sz: TensorElemSize::Fixed {sz}, shape: vec![]}
+    }
+
+    pub fn is_scalar(&self) -> bool {
+        self.get_scalar_elem_size().is_some()
+    }
+
+    pub fn is_bool_scalar(&self) -> bool {
+        match self.get_scalar_elem_size() {
+            Some(ElemSize::Bool) => true,
+            _ => false
+        }
+    }
+
+    pub fn is_int_scalar(&self) -> bool {
+        match self.get_scalar_elem_size() {
+            Some(sz) => sz.is_integer(),
+            _ => false
+        }
+    }
+
+    pub fn is_float_scalar(&self) -> bool {
+        match self.get_scalar_elem_size() {
+            Some(sz) => sz.is_floating_point(),
+            None => false
         }
     }
 
@@ -56,8 +114,7 @@ impl SMapAccum<Type> for Type {
                 let (acc, fields) = fields.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Type::Dict {fields}))
             },
-            Type::String | Type::Tensor {..} | Type::Pointer {..} | Type::Void |
-            Type::Unknown => {
+            Type::String | Type::Tensor {..} | Type::Void | Type::Unknown => {
                 Ok((acc?, self))
             }
         }
@@ -73,8 +130,7 @@ impl SFold<Type> for Type {
         match self {
             Type::Tuple {elems} => elems.sfold_result(acc, f),
             Type::Dict {fields} => fields.sfold_result(acc, f),
-            Type::String | Type::Tensor {..} | Type::Pointer {..} |
-            Type::Void | Type::Unknown => acc
+            Type::String | Type::Tensor {..} | Type::Void | Type::Unknown => acc
         }
     }
 }
@@ -86,6 +142,22 @@ pub enum Builtin {
     Convert {sz: ElemSize}, Label, GpuContext
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ReduceOp {
+    #[default] Max, Min, Sum, Prod
+}
+
+impl ReduceOp {
+    pub fn to_bin_op(&self) -> BinOp {
+        match self {
+            ReduceOp::Max => BinOp::Max,
+            ReduceOp::Min => BinOp::Min,
+            ReduceOp::Sum => BinOp::Add,
+            ReduceOp::Prod => BinOp::Mul,
+        }
+    }
+}
+
 #[derive(Clone, Debug, EnumIter)]
 pub enum Expr {
     Var {id: Name, ty: Type, i: Info},
@@ -95,13 +167,13 @@ pub enum Expr {
     Float {v: f64, ty: Type, i: Info},
     UnOp {op: UnOp, arg: Box<Expr>, ty: Type, i: Info},
     BinOp {lhs: Box<Expr>, op: BinOp, rhs: Box<Expr>, ty: Type, i: Info},
+    ReduceOp {op: ReduceOp, arg: Box<Expr>, ty: Type, i: Info},
     IfExpr {cond: Box<Expr>, thn: Box<Expr>, els: Box<Expr>, ty: Type, i: Info},
     Subscript {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Slice {lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, ty: Type, i: Info},
     Tuple {elems: Vec<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
-    NeutralElement {op: BinOp, tyof: Box<Expr>, i: Info},
-    Builtin {func: Builtin, args: Vec<Expr>, axis: Option<i64>, ty: Type, i: Info},
+    Builtin {func: Builtin, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type},
 }
 
@@ -115,12 +187,12 @@ impl Expr {
             Expr::Float {..} => 4,
             Expr::UnOp {..} => 5,
             Expr::BinOp {..} => 6,
-            Expr::IfExpr {..} => 7,
-            Expr::Subscript {..} => 8,
-            Expr::Slice {..} => 9,
-            Expr::Tuple {..} => 10,
-            Expr::Call {..} => 11,
-            Expr::NeutralElement {..} => 12,
+            Expr::ReduceOp {..} => 7,
+            Expr::IfExpr {..} => 8,
+            Expr::Subscript {..} => 9,
+            Expr::Slice {..} => 10,
+            Expr::Tuple {..} => 11,
+            Expr::Call {..} => 12,
             Expr::Builtin {..} => 13,
             Expr::Convert {..} => 14,
         }
@@ -135,13 +207,13 @@ impl Expr {
             Expr::Float {v, ty, ..} => Expr::Float {v, ty, i},
             Expr::UnOp {op, arg, ty, ..} => Expr::UnOp {op, arg, ty, i},
             Expr::BinOp {lhs, op, rhs, ty, ..} => Expr::BinOp {lhs, op, rhs, ty, i},
+            Expr::ReduceOp {op, arg, ty, ..} => Expr::ReduceOp {op, arg, ty, i},
             Expr::IfExpr {cond, thn, els, ty, ..} => Expr::IfExpr {cond, thn, els, ty, i},
             Expr::Subscript {target, idx, ty, ..} => Expr::Subscript {target, idx, ty, i},
             Expr::Slice {lo, hi, ty, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, ty, ..} => Expr::Tuple {elems, ty, i},
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
-            Expr::NeutralElement {op, tyof, ..} => Expr::NeutralElement {op, tyof, i},
-            Expr::Builtin {func, args, axis, ty, ..} => Expr::Builtin {func, args, axis, ty, i},
+            Expr::Builtin {func, args, ty, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
         }
     }
@@ -157,12 +229,12 @@ impl ExprType<Type> for Expr {
             Expr::Float {ty, ..} => ty,
             Expr::UnOp {ty, ..} => ty,
             Expr::BinOp {ty, ..} => ty,
+            Expr::ReduceOp {ty, ..} => ty,
             Expr::IfExpr {ty, ..} => ty,
             Expr::Subscript {ty, ..} => ty,
             Expr::Slice {ty, ..} => ty,
             Expr::Tuple {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
-            Expr::NeutralElement {tyof, ..} => tyof.get_type(),
             Expr::Builtin {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
         }
@@ -172,9 +244,9 @@ impl ExprType<Type> for Expr {
         match self {
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} => true,
-            Expr::UnOp {..} | Expr::BinOp {..} | Expr::IfExpr {..} |
-            Expr::Subscript {..} | Expr::Slice {..} | Expr::Tuple {..} |
-            Expr::Call {..} | Expr::NeutralElement {..} | Expr::Builtin {..} |
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
+            Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
+            Expr::Tuple {..} | Expr::Call {..} | Expr::Builtin {..} |
             Expr::Convert {..} => false,
         }
     }
@@ -193,6 +265,9 @@ impl Ord for Expr {
             ( Expr::BinOp {lhs: llhs, op: lop, rhs: lrhs, ..}
             , Expr::BinOp {lhs: rlhs, op: rop, rhs: rrhs, ..} ) =>
                 llhs.cmp(rlhs).then(lop.cmp(rop)).then(lrhs.cmp(rrhs)),
+            ( Expr::ReduceOp {op: lop, arg: larg, ..}
+            , Expr::ReduceOp {op: rop, arg: rarg, ..} ) =>
+                lop.cmp(rop).then(larg.cmp(rarg)),
             ( Expr::IfExpr {cond: lcond, thn: lthn, els: lels, ..}
             , Expr::IfExpr {cond: rcond, thn: rthn, els: rels, ..} ) =>
                 lcond.cmp(rcond).then(lthn.cmp(rthn)).then(lels.cmp(rels)),
@@ -205,9 +280,6 @@ impl Ord for Expr {
                 lelems.cmp(relems),
             (Expr::Call {id: lid, args: largs, ..}, Expr::Call {id: rid, args: rargs, ..}) =>
                 lid.cmp(rid).then(largs.cmp(rargs)),
-            ( Expr::NeutralElement {op: lop, tyof: ltyof, ..}
-            , Expr::NeutralElement {op: rop, tyof: rtyof, ..} ) =>
-                lop.cmp(rop).then(ltyof.cmp(rtyof)),
             ( Expr::Builtin {func: lfunc, args: largs, ..}
             , Expr::Builtin {func: rfunc, args: rargs, ..} ) =>
                 lfunc.cmp(rfunc).then(largs.cmp(rargs)),
@@ -242,12 +314,12 @@ impl InfoNode for Expr {
             Expr::Float {i, ..} => i.clone(),
             Expr::UnOp {i, ..} => i.clone(),
             Expr::BinOp {i, ..} => i.clone(),
+            Expr::ReduceOp {i, ..} => i.clone(),
             Expr::IfExpr {i, ..} => i.clone(),
             Expr::Subscript {i, ..} => i.clone(),
             Expr::Slice {i, ..} => i.clone(),
             Expr::Tuple {i, ..} => i.clone(),
             Expr::Call {i, ..} => i.clone(),
-            Expr::NeutralElement {i, ..} => i.clone(),
             Expr::Builtin {i, ..} => i.clone(),
             Expr::Convert {e, ..} => e.get_info(),
         }
@@ -278,6 +350,10 @@ impl SMapAccum<Expr> for Expr {
                     lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i
                 }))
             },
+            Expr::ReduceOp {op, arg, ty, i} => {
+                let (acc, arg) = f(acc?, *arg)?;
+                Ok((acc, Expr::ReduceOp {op, arg: Box::new(arg), ty, i}))
+            },
             Expr::IfExpr {cond, thn, els, ty, i} => {
                 let (acc, cond) = f(acc?, *cond)?;
                 let (acc, thn) = f(acc, *thn)?;
@@ -306,13 +382,9 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, ty, i}))
             },
-            Expr::Builtin {func, args, axis, ty, i} => {
+            Expr::Builtin {func, args, ty, i} => {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Expr::Builtin {func, args, axis, ty, i}))
-            },
-            Expr::NeutralElement {op, tyof, i} => {
-                let (acc, tyof) = f(acc?, *tyof)?;
-                Ok((acc, Expr::NeutralElement {op, tyof: Box::new(tyof), i}))
+                Ok((acc, Expr::Builtin {func, args, ty, i}))
             },
             Expr::Convert {e, ty} => {
                 let (acc, e) = f(acc?, *e)?;
@@ -335,12 +407,12 @@ impl SFold<Expr> for Expr {
         match self {
             Expr::UnOp {arg, ..} => f(acc?, arg),
             Expr::BinOp {lhs, rhs, ..} => f(f(acc?, lhs)?, rhs),
+            Expr::ReduceOp {arg, ..} => f(acc?, arg),
             Expr::IfExpr {cond, thn, els, ..} => f(f(f(acc?, cond)?, thn)?, els),
             Expr::Subscript {target, idx, ..} => f(f(acc?, target)?, idx),
             Expr::Slice {lo, hi, ..} => hi.sfold_result(lo.sfold_result(acc, &f), &f),
             Expr::Tuple {elems, ..} => elems.sfold_result(acc, &f),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
-            Expr::NeutralElement {tyof, ..} => f(acc?, tyof),
             Expr::Builtin {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
@@ -361,7 +433,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>, i: Info},
     Return {value: Expr, i: Info},
     WithGpuContext {body: Vec<Stmt>, i: Info},
-    Call {func: String, args: Vec<Expr>, i: Info},
+    Call {func: Name, args: Vec<Expr>, i: Info},
     Label {label: String, i: Info}
 }
 
@@ -557,6 +629,7 @@ pub struct Ast {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::py::ast_builder::*;
 
     use strum::IntoEnumIterator;
 
@@ -568,19 +641,28 @@ mod test {
 
     #[test]
     fn scalar_elem_size_scalar_tensor() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![]};
+        let ty = scalar(ElemSize::I64);
         assert_eq!(ty.get_scalar_elem_size(), Some(&ElemSize::I64));
     }
 
     #[test]
     fn scalar_elem_size_vector() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![10]};
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::I64),
+            shape: vec![TensorShape::Num {n: 10}]
+        };
         assert_eq!(ty.get_scalar_elem_size(), None);
     }
 
     #[test]
     fn scalar_elem_size_multi_dim_tensor() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![10,20]};
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::I64),
+            shape: vec![
+                TensorShape::Num {n: 10},
+                TensorShape::Num {n: 20}
+            ]
+        };
         assert_eq!(ty.get_scalar_elem_size(), None);
     }
 

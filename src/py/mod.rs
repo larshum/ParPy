@@ -1,22 +1,22 @@
 pub mod ast;
 mod constant_fold;
+mod eliminate_duplicate_functions;
 mod from_py;
-mod indices;
 mod inline_calls;
 mod inline_const;
-mod insert_called_functions;
 mod labels;
-mod no_return;
 mod par;
 mod pprint;
-mod slices;
+mod replace_builtins;
+mod shape_symbol_labels;
+mod slice_transformation;
+mod specialize;
 mod symbolize;
 mod type_check;
 
 #[cfg(test)]
 pub mod ast_builder;
 
-use symbolize::Symbolize;
 use crate::py_runtime_error;
 use crate::option::*;
 use crate::utils::ast::ScalarSizes;
@@ -37,8 +37,9 @@ pub fn parse_untyped_ast<'py>(
     tops: &BTreeMap<String, Bound<'py, PyCapsule>>,
     vars: (Bound<'py, PyDict>, Bound<'py, PyDict>)
 ) -> PyResult<ast::FunDef> {
-    let ast = from_py::to_untyped_ir(ast, info, tops, vars)?;
-    let ast = ast.symbolize_default()?;
+    let ast = from_py::to_untyped_ir(ast, info, tops, vars.clone())?;
+    let ast = symbolize::with_tops(tops, &vars, ast)?;
+    let ast = replace_builtins::apply(ast)?;
     labels::associate_labels(ast)
 }
 
@@ -51,7 +52,7 @@ pub fn specialize_ast_on_arguments<'py>(
 ) -> PyResult<ast::Ast> {
     // We expect the top to contain a function definition, but it could also be an external
     // declaration, in which case we report an error.
-    let def = match t {
+    let main = match t {
         ast::Top::FunDef {v} => Ok(v),
         ast::Top::ExtDecl {id, ..} => {
             py_runtime_error!(
@@ -62,48 +63,32 @@ pub fn specialize_ast_on_arguments<'py>(
         }
     }?;
 
-    let par = &opts.parallelize;
+    // Adds labels to statements corresponding to the shape symbols they use, if this is enabled in
+    // the compiler.
+    let main = shape_symbol_labels::add_implicit_labels(&opts, main);
 
     // Ensure the AST contains any degree of parallelism - otherwise, there is no point in using
     // this framework at all.
-    par::ensure_parallelism(&def, &par)?;
+    par::ensure_parallelism(&main, &opts.parallelize)?;
 
-    // Perform the type-checking and inlining of literal values in an intertwined manner. First, we
-    // type-check the parameters based on the corresponding arguments provided in the function
-    // call. Second, once the parameters have been typed, we inline the values of scalar parameters
-    // into the AST.
-    //
-    // This particular order is important, because it allows us to reason about the exact sizes of
-    // all slices and by extension the correctness of dimensions of slice operations.
+    // Applies the type-checker, which resolves shape sizes and monomorphizes functions based on
+    // the provided arguments. The result is an AST containing all monomorphized versions of
+    // top-level definitions. Before printing the AST, we eliminate unnecessary duplicates of the
+    // same function, as the type-checker may produce such instances.
     let scalar_sizes = ScalarSizes::from_opts(&opts);
-    let def = type_check::type_check_params(def, &args, &scalar_sizes)?;
-    let def = inline_const::inline_scalar_values(def, &args)?;
-    debug_env.print("Python-like AST after inlining", &def);
-
-    let ast = insert_called_functions::apply(tops, def)?;
-
-    // As the types of slice operations involve tensors, we check that the shapes of all operations
-    // are valid, ignoring the element types inside tensors. Next, we resolve indices based on the
-    // inferred shapes, replacing negative and omitted indices with valid non-negative indices.
-    // After this, we perform the slice transformation, replacing slice statements with scalar
-    // operations. Finally, we can type-check the scalar operations of the resulting AST.
-    //
-    // Slice operations must be explicit, but they are allowed to perform broadcasting operations,
-    // unlike regular operations. When working with slices, the dimensions are explicitly declared,
-    // making it natural to specify parallelism, while regular broadcasting would make this
-    // implicit and therefore ill-suited with the parallelism approach used in this library.
-    let (_, ast) = type_check::check_body_shape(ast, &scalar_sizes)?;
-    debug_env.print("Python-like AST after shape checking", &ast);
-    let ast = indices::resolve_indices(ast)?;
-    debug_env.print("Python-like AST after resolving indices", &ast);
-    let ast = slices::replace_slices_with_for_loops(ast)?;
-    debug_env.print("Python-like AST after slice transformation", &ast);
-    let (_, ast) = type_check::type_check_body(ast, &scalar_sizes)?;
+    let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
+    let ast = eliminate_duplicate_functions::apply(ast)?;
     debug_env.print("Python-like AST after type-checking", &ast);
 
-    // Ensure that the main function contains return statements, as we cannot return values from
-    // within a kernel or within the entry point function.
-    no_return::check_no_return_in_main_function(&ast)?;
+    // Inline the values of any scalar arguments provided to the main function. This may
+    // significantly improve performance as it provides additional information to the underlying
+    // compiler, but results in the need to JIT when this value changes.
+    let ast = inline_const::inline_scalar_values(ast, &args)?;
+    debug_env.print("Python-like AST after inlining", &ast);
+
+    // Transform slice statements into for-loops.
+    let ast = slice_transformation::apply(ast, &scalar_sizes)?;
+    debug_env.print("Python-like AST after slice transformation", &ast);
 
     Ok(ast)
 }
@@ -126,5 +111,12 @@ macro_rules! py_name_error {
 macro_rules! py_type_error {
     ($i:expr,$($t:tt)*) => {
         Err(Into::<PyErr>::into(CompileError::type_err($i.error_msg(format!($($t)*)))))
+    }
+}
+
+#[macro_export]
+macro_rules! py_internal_error {
+    ($i:expr,$($t:tt)*) => {
+        Err(Into::<PyErr>::into(CompileError::internal_err($i.error_msg(format!($($t)*)))))
     }
 }

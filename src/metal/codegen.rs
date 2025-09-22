@@ -85,8 +85,13 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
         gpu_ast::Expr::Int {v, i, ..} => Ok(Expr::Int {v, ty, i}),
         gpu_ast::Expr::Float {v, i, ..} => Ok(Expr::Float {v, ty, i}),
         gpu_ast::Expr::UnOp {op, arg, i, ..} => {
-            let arg = Box::new(from_gpu_ir_expr(env, *arg)?);
-            Ok(Expr::UnOp {op, arg, ty, i})
+            let arg = from_gpu_ir_expr(env, *arg)?;
+            match (&op, &ty) {
+                (UnOp::Abs, Type::Scalar {sz}) if sz.is_unsigned_integer() => {
+                    Ok(arg)
+                },
+                _ => Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
+            }
         },
         gpu_ast::Expr::BinOp {lhs, op, rhs, i, ..} => {
             let lhs = Box::new(from_gpu_ir_expr(env, *lhs)?);
