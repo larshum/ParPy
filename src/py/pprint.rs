@@ -44,25 +44,36 @@ impl PrettyPrint for TensorShape {
     }
 }
 
+impl PrettyPrint for TensorElemSize {
+    fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+        match self {
+            TensorElemSize::Fixed {sz} => (env, print_scalar(&sz)),
+            TensorElemSize::Variable {id: Name {sym: Some(s), ..}} => {
+                (env, format!("var<{s}>"))
+            },
+            TensorElemSize::Variable {..} => (env, format!("var<?>"))
+        }
+    }
+}
+
 impl PrettyPrint for Type {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        let s = match self {
-            Type::String => format!("str"),
-            Type::Tensor {sz, shape} if shape.is_empty() => print_scalar(sz),
+        match self {
+            Type::String => (env, format!("str")),
+            Type::Tensor {sz, shape} if shape.is_empty() => sz.pprint(env),
             Type::Tensor {sz, shape} => {
                 let (_, s) = pprint_iter(shape.iter(), env.clone(), ", ");
-                let sz = print_scalar(sz);
-                format!("parpy.types.buffer({sz}, [{s}])")
+                let (env, sz) = sz.pprint(env);
+                (env, format!("parpy.types.buffer({sz}, [{s}])"))
             },
             Type::Tuple {elems} => {
-                let (_, s) = pprint_iter(elems.iter(), env.clone(), ", ");
-                format!("tuple[{s}]")
+                let (env, s) = pprint_iter(elems.iter(), env.clone(), ", ");
+                (env, format!("tuple[{s}]"))
             },
-            Type::Dict {..} => format!("dict[str, Any]"),
-            Type::Void => format!("()"),
-            Type::Unknown => format!("Any")
-        };
-        (env, s.to_string())
+            Type::Dict {..} => (env, format!("dict[str, Any]")),
+            Type::Void => (env, format!("()")),
+            Type::Unknown => (env, format!("Any"))
+        }
     }
 }
 
@@ -366,6 +377,12 @@ impl fmt::Display for TensorShape {
     }
 }
 
+impl fmt::Display for TensorElemSize {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.pprint_default())
+    }
+}
+
 impl fmt::Display for Builtin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.pprint_default())
@@ -415,7 +432,7 @@ mod test {
     #[test]
     fn print_1d_tensor_type() {
         let ty = Type::Tensor {
-            sz: ElemSize::I16,
+            sz: fixed_elem_sz(ElemSize::I16),
             shape: vec![TensorShape::Num {n: 10}]
         };
         assert_eq!(ty.pprint_default(), "parpy.types.buffer(parpy.types.I16, [10])");
@@ -424,7 +441,7 @@ mod test {
     #[test]
     fn print_2d_tensor_type() {
         let ty = Type::Tensor {
-            sz: ElemSize::U8,
+            sz: fixed_elem_sz(ElemSize::U8),
             shape: vec![
                 TensorShape::Num {n: 10},
                 TensorShape::Num {n: 20}
@@ -436,11 +453,16 @@ mod test {
     #[test]
     fn print_shape_var_tensor_type() {
         let id = Name::sym_str("N");
+        let s = id.sym.clone();
         let ty = Type::Tensor {
-            sz: ElemSize::F32,
+            sz: fixed_elem_sz(ElemSize::F32),
             shape: vec![TensorShape::Symbol {id}]
         };
-        assert_eq!(ty.pprint_default(), "parpy.types.buffer(parpy.types.F32, [N])");
+        let expected = format!(
+            "parpy.types.buffer(parpy.types.F32, [shape<{}>])",
+            s.map(|i| i.to_string()).unwrap_or("?".to_string())
+        );
+        assert_eq!(ty.pprint_default(), expected);
     }
 
     #[test]

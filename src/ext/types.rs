@@ -19,6 +19,21 @@ impl Symbol {
 
 #[pyclass(eq, frozen)]
 #[derive(Clone, Debug, PartialEq)]
+pub struct TypeVar {
+    pub id: Name
+}
+
+#[pymethods]
+impl TypeVar {
+    #[new]
+    fn new() -> TypeVar {
+        TypeVar {id: Name::sym_str("")}
+    }
+}
+
+#[pyclass(eq, frozen)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ExtType {
     Buffer(ElemSize, Vec<Symbol>),
+    VarBuffer(TypeVar, Vec<Symbol>),
 }

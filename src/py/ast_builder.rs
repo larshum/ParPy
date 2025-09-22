@@ -9,15 +9,20 @@ pub fn tyuk() -> Type {
     Type::Unknown
 }
 
+pub fn fixed_elem_sz(sz: ElemSize) -> TensorElemSize {
+    TensorElemSize::Fixed {sz}
+}
+
 pub fn shape(v: Vec<i64>) -> Type {
+    let sz = fixed_elem_sz(ElemSize::I64);
     let shape = v.into_iter()
         .map(|n| TensorShape::Num {n})
         .collect::<Vec<TensorShape>>();
-    Type::Tensor {sz: ElemSize::I64, shape}
+    Type::Tensor {sz, shape}
 }
 
 pub fn scalar(sz: ElemSize) -> Type {
-    Type::Tensor {sz, shape: vec![]}
+    Type::fixed_scalar(sz)
 }
 
 pub fn dict_ty(fields: Vec<(&str, Type)>) -> Type {

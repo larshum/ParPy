@@ -267,7 +267,8 @@ mod test {
 
     fn nvar(id: &Name) -> Expr {
         Expr::Var {
-            id: id.clone(), ty: Type::Tensor {sz: ElemSize::Bool, shape: vec![]},
+            id: id.clone(),
+            ty: scalar(ElemSize::Bool),
             i: Info::default()
         }
     }
@@ -404,9 +405,10 @@ mod test {
         let n = Name::sym_str("");
         let param = Param {
             id: id("x"),
-            ty: Type::Tensor {sz: ElemSize::I32, shape: vec![
-                TensorShape::Symbol {id: n.clone()}
-            ]},
+            ty: Type::Tensor {
+                sz: fixed_elem_sz(ElemSize::I32),
+                shape: vec![TensorShape::Symbol {id: n.clone()}]
+            },
             i: i()
         };
         let def = FunDef {

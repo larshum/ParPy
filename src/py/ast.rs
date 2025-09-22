@@ -28,10 +28,22 @@ impl TensorShape {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
+pub enum TensorElemSize {
+    Fixed {sz: ElemSize},
+    Variable {id: Name},
+}
+
+impl Default for TensorElemSize {
+    fn default() -> Self {
+        TensorElemSize::Fixed {sz: ElemSize::default()}
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum Type {
     String,
-    Tensor {sz: ElemSize, shape: Vec<TensorShape>},
+    Tensor {sz: TensorElemSize, shape: Vec<TensorShape>},
     Tuple {elems: Vec<Type>},
     Dict {fields: BTreeMap<String, Type>},
     Void,
@@ -41,9 +53,16 @@ pub enum Type {
 impl Type {
     pub fn get_scalar_elem_size<'a>(&'a self) -> Option<&'a ElemSize> {
         match self {
-            Type::Tensor {sz, shape} if shape.is_empty() => Some(sz),
+            Type::Tensor {sz, shape} if shape.is_empty() => match sz {
+                TensorElemSize::Fixed {sz} => Some(sz),
+                TensorElemSize::Variable {..} => None
+            },
             _ => None
         }
+    }
+
+    pub fn fixed_scalar(sz: ElemSize) -> Type {
+        Type::Tensor {sz: TensorElemSize::Fixed {sz}, shape: vec![]}
     }
 
     pub fn is_scalar(&self) -> bool {
@@ -610,6 +629,7 @@ pub struct Ast {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::py::ast_builder::*;
 
     use strum::IntoEnumIterator;
 
@@ -621,20 +641,23 @@ mod test {
 
     #[test]
     fn scalar_elem_size_scalar_tensor() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![]};
+        let ty = scalar(ElemSize::I64);
         assert_eq!(ty.get_scalar_elem_size(), Some(&ElemSize::I64));
     }
 
     #[test]
     fn scalar_elem_size_vector() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![TensorShape::Num {n: 10}]};
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::I64),
+            shape: vec![TensorShape::Num {n: 10}]
+        };
         assert_eq!(ty.get_scalar_elem_size(), None);
     }
 
     #[test]
     fn scalar_elem_size_multi_dim_tensor() {
         let ty = Type::Tensor {
-            sz: ElemSize::I64,
+            sz: fixed_elem_sz(ElemSize::I64),
             shape: vec![
                 TensorShape::Num {n: 10},
                 TensorShape::Num {n: 20}

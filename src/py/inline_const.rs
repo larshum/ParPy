@@ -82,13 +82,13 @@ fn extract_scalar_value<'py>(
 ) -> PyResult<Expr> {
     if sz == ElemSize::Bool {
         let v = arg.extract::<bool>()?;
-        Ok(Expr::Bool {v, ty: Type::Tensor {sz, shape: vec![]}, i: i.clone()})
+        Ok(Expr::Bool {v, ty: Type::fixed_scalar(sz), i: i.clone()})
     } else if sz.is_integer() {
         let v = arg.extract::<i128>()?;
-        Ok(Expr::Int {v, ty: Type::Tensor {sz, shape: vec![]}, i: i.clone()})
+        Ok(Expr::Int {v, ty: Type::fixed_scalar(sz), i: i.clone()})
     } else if sz.is_floating_point() {
         let v = arg.extract::<f64>()?;
-        Ok(Expr::Float {v, ty: Type::Tensor {sz, shape: vec![]}, i: i.clone()})
+        Ok(Expr::Float {v, ty: Type::fixed_scalar(sz), i: i.clone()})
     } else {
         py_runtime_error!(i, "Invalid scalar of element type {sz}")
     }
@@ -102,7 +102,7 @@ fn add_scalar_constant<'py>(
     let ty = target.get_type();
     let i = target.get_info();
     match ty {
-        Type::Tensor {sz, shape} if shape.is_empty() => {
+        Type::Tensor {sz: TensorElemSize::Fixed {sz}, shape} if shape.is_empty() => {
             match extract_scalar_value(arg, &i, sz.clone()) {
                 Ok(value) => {
                     acc.insert(target, value);
@@ -152,6 +152,7 @@ pub fn inline_scalar_values<'py>(
 mod test {
     use super::*;
     use crate::test::*;
+    use crate::py::ast_builder::*;
     use crate::utils::name::Name;
     use std::ffi::CString;
     use pyo3::types;
@@ -175,20 +176,16 @@ mod test {
         Name::sym_str(s)
     }
 
-    fn scalar_ty(sz: ElemSize) -> Type {
-        Type::Tensor {sz, shape: vec![]}
-    }
-
     fn int(v: i64) -> Expr {
-        Expr::Int {v: v as i128, ty: scalar_ty(ElemSize::I64), i: i()}
+        Expr::Int {v: v as i128, ty: scalar(ElemSize::I64), i: i()}
     }
 
     fn float(v: f64) -> Expr {
-        Expr::Float {v, ty: scalar_ty(ElemSize::F64), i: i()}
+        Expr::Float {v, ty: scalar(ElemSize::F64), i: i()}
     }
 
     fn bool(v: bool) -> Expr {
-        Expr::Bool {v, ty: scalar_ty(ElemSize::Bool), i: i()}
+        Expr::Bool {v, ty: scalar(ElemSize::Bool), i: i()}
     }
 
     fn string(s: &str) -> Expr {
@@ -198,7 +195,7 @@ mod test {
     #[test]
     fn extract_integer_literal() {
         let target = Expr::Var {
-            id: var("x"), ty: scalar_ty(ElemSize::I64), i: i()
+            id: var("x"), ty: scalar(ElemSize::I64), i: i()
         };
         let env = extract_literals("3", target.clone());
         assert_eq!(env.get(&target), Some(&int(3)));
@@ -207,7 +204,7 @@ mod test {
     #[test]
     fn extract_float_literal() {
         let target = Expr::Var {
-            id: var("y"), ty: scalar_ty(ElemSize::F64), i: i()
+            id: var("y"), ty: scalar(ElemSize::F64), i: i()
         };
         let env = extract_literals("2.0", target.clone());
         assert_eq!(env.get(&target), Some(&float(2.0)));
@@ -230,7 +227,7 @@ mod test {
     #[test]
     fn extract_dict_entry_literals() {
         let keys = ["a".to_string(), "b".to_string(), "c".to_string()];
-        let types = [scalar_ty(ElemSize::I64), scalar_ty(ElemSize::Bool), scalar_ty(ElemSize::F64)];
+        let types = [scalar(ElemSize::I64), scalar(ElemSize::Bool), scalar(ElemSize::F64)];
         let fields = keys.clone()
             .into_iter()
             .zip(types.into_iter())

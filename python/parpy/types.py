@@ -13,10 +13,17 @@ F16 = ElemSize.F16
 F32 = ElemSize.F32
 F64 = ElemSize.F64
 
-def buffer(elem_ty, shape):
+def buffer(sz, shape):
     from .parpy import ExtType
-    return ExtType.Buffer(elem_ty, shape)
+    if isinstance(sz, ElemSize):
+        return ExtType.Buffer(sz, shape)
+    else:
+        return ExtType.VarBuffer(sz, shape)
 
 def symbol():
     from .parpy import Symbol
     return Symbol()
+
+def type_var():
+    from .parpy import TypeVar
+    return TypeVar()

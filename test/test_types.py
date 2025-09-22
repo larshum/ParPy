@@ -155,3 +155,100 @@ def test_shape_implicit_labeling(backend):
             implicit_labels_add_elemwise(x, y, opts=opts)
         assert e_info.match(r"The function .* does not contain any parallelism")
     run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_type_variable_scalar_inference(backend):
+    sz = parpy.types.type_var()
+
+    @parpy.jit
+    def add_type_variable(x: sz, y: sz) -> sz:
+        return x + y
+
+    @parpy.jit
+    def call_type_var_func(x):
+        parpy.label('N')
+        x[:] = add_type_variable(x[:], x[:])
+
+    x = np.ndarray((10,), dtype=np.float32)
+    opts = par_opts(backend, {'N': parpy.threads(32)})
+    code = parpy.print_compiled(call_type_var_func, [x], opts)
+    assert len(code) != 0
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_type_variable_contradiction(backend):
+    sz = parpy.types.type_var()
+
+    @parpy.jit
+    def add_type_variable2(x: sz, y: sz) -> sz:
+        return x + y
+
+    @parpy.jit
+    def call_type_var_func2(x, y):
+        parpy.label('N')
+        x[:] = add_type_variable2(x[:], y[:])
+
+    x = np.ndarray((10,), dtype=np.float32)
+    y = np.ndarray((10,), dtype=np.int32)
+    opts = par_opts(backend, {'N': parpy.threads(32)})
+    with pytest.raises(TypeError) as e_info:
+        parpy.print_compiled(call_type_var_func2, [x, y], opts)
+    assert e_info.match("Parameter y was annotated with type .* which is incompatible with .*")
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_type_variable_multiple_instantiations(backend):
+    sz = parpy.types.type_var()
+
+    @parpy.jit
+    def add_type_variable3(x: sz, y: sz) -> sz:
+        return x + y
+
+    @parpy.jit
+    def multi_instantiation_type_vars(x, y):
+        with parpy.gpu:
+            x[:] = add_type_variable3(x[:], x[:])
+            y[:] = add_type_variable3(y[:], y[:])
+
+    x = np.ndarray((10,), dtype=np.float32)
+    y = np.ndarray((10,), dtype=np.int32)
+    opts = par_opts(backend, {})
+    code = parpy.print_compiled(multi_instantiation_type_vars, [x, y], opts)
+    assert len(code) != 0
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_type_variable_in_buffer(backend):
+    N = parpy.types.symbol()
+    sz = parpy.types.type_var()
+
+    @parpy.jit
+    def add_elemwise_type_variables(
+        x: parpy.types.buffer(sz, [N]),
+        y: parpy.types.buffer(sz, [N])
+    ):
+        parpy.label('N')
+        x[:] = x[:] + y[:]
+
+    x = np.ndarray((10,), dtype=np.float32)
+    y = np.ndarray((10,), dtype=np.float32)
+    opts = par_opts(backend, {'N': parpy.threads(32)})
+    code = parpy.print_compiled(add_elemwise_type_variables, [x, y], opts)
+    assert len(code) != 0
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_type_variable_in_buffer_contradiction(backend):
+    N = parpy.types.symbol()
+    sz = parpy.types.type_var()
+
+    @parpy.jit
+    def add_elemwise_type_variables2(
+        x: parpy.types.buffer(sz, [N]),
+        y: parpy.types.buffer(sz, [N])
+    ):
+        parpy.label('N')
+        x[:] = x[:] + y[:]
+
+    x = np.ndarray((10,), dtype=np.float32)
+    y = np.ndarray((10,), dtype=np.int32)
+    opts = par_opts(backend, {'N': parpy.threads(32)})
+    with pytest.raises(TypeError) as e_info:
+        parpy.print_compiled(add_elemwise_type_variables2, [x, y], opts)
+    assert e_info.match("Incompatible element types.*")

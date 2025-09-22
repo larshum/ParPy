@@ -1,6 +1,6 @@
 use super::ast::*;
 use crate::py_runtime_error;
-use crate::ext::types::ExtType;
+use crate::ext::types::{ExtType, TypeVar};
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
@@ -235,20 +235,29 @@ fn try_extract_type_annotation<'py, 'a>(
     let fail = || py_runtime_error!(i, "Unsupported parameter type annotation");
     let py = annot.py();
     match eval_node(&annot, &env, py) {
-        Ok(ty) => {
-            let sz = ty.extract::<ElemSize>();
-            if sz.is_ok() {
-                Ok(Type::Tensor {shape: vec![], sz: sz?})
-            } else {
-                let ext_type = ty.extract::<ExtType>();
-                if ext_type.is_ok() {
-                    let ExtType::Buffer(sz, syms) = ext_type?;
-                    let shape = syms.into_iter()
-                        .map(|sym| TensorShape::Symbol {id: sym.id})
-                        .collect::<Vec<TensorShape>>();
-                    Ok(Type::Tensor {shape, sz})
-                } else {
-                    fail()
+        Ok(ty) => match ty.extract::<ElemSize>() {
+            Ok(sz) => Ok(Type::fixed_scalar(sz)),
+            Err(_) => match ty.extract::<TypeVar>() {
+                Ok(var) => {
+                    let sz = TensorElemSize::Variable {id: var.id};
+                    Ok(Type::Tensor {sz, shape: vec![]})
+                },
+                Err(_) => match ty.extract::<ExtType>() {
+                    Ok(ExtType::Buffer(sz, syms)) => {
+                        let sz = TensorElemSize::Fixed {sz};
+                        let shape = syms.into_iter()
+                            .map(|sym| TensorShape::Symbol {id: sym.id})
+                            .collect::<Vec<TensorShape>>();
+                        Ok(Type::Tensor {sz, shape})
+                    },
+                    Ok(ExtType::VarBuffer(tyvar, syms)) => {
+                        let sz = TensorElemSize::Variable {id: tyvar.id};
+                        let shape = syms.into_iter()
+                            .map(|sym| TensorShape::Symbol {id: sym.id})
+                            .collect::<Vec<TensorShape>>();
+                        Ok(Type::Tensor {sz, shape})
+                    },
+                    Err(_) => fail()
                 }
             }
         },

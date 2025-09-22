@@ -56,8 +56,7 @@ fn replace_unary_builtin(
         Builtin::Sum => Ok(Expr::ReduceOp {op: ReduceOp::Sum, arg, ty, i}),
         Builtin::Prod => Ok(Expr::ReduceOp {op: ReduceOp::Prod, arg, ty, i}),
         Builtin::Convert {sz} => {
-            let ty = Type::Tensor {sz, shape: vec![]};
-            Ok(Expr::Convert {e: arg, ty})
+            Ok(Expr::Convert {e: arg, ty: Type::fixed_scalar(sz)})
         },
         _ => {
             let op = to_unop(func, &i)?;

@@ -215,7 +215,7 @@ fn substitute_variables(e: Expr, subs: &BTreeMap<Name, Expr>) -> Expr {
 }
 
 fn mk_int(v: i128, scalar_sizes: &ScalarSizes, i: &Info) -> Expr {
-    let ty = Type::Tensor {sz: scalar_sizes.int.clone(), shape: vec![]};
+    let ty = Type::fixed_scalar(scalar_sizes.int.clone());
     Expr::Int {v, ty, i: i.clone()}
 }
 
@@ -282,18 +282,16 @@ impl ReduceTargetType {
 }
 
 fn find_neutral_element(op: &BinOp, ty: &Type, i: &Info) -> PyResult<Expr> {
-    match ty {
-        Type::Tensor {sz, shape} if shape.is_empty() => {
-            match reduce::neutral_element(&op, &sz, &i) {
-                Some(e) => Ok(e),
-                None => {
-                    let op = op.pprint_default();
-                    py_runtime_error!(i, "Failed to find neutral element for \
-                                          reduction operation {op}")
-                }
+    match ty.get_scalar_elem_size() {
+        Some(sz) => match reduce::neutral_element(&op, &sz, &i) {
+            Some(e) => Ok(e),
+            None => {
+                let op = op.pprint_default();
+                py_runtime_error!(i, "Failed to find neutral element for \
+                                      reduction operation {op}.")
             }
-        },
-        _ => py_type_error!(i, "Invalid type {ty} of reduction")
+        }
+        None => py_type_error!(i, "Invalid type {ty} of reduction")
     }
 }
 

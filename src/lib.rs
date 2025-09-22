@@ -134,6 +134,7 @@ fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ext::buffer::DataType>()?;
     m.add_class::<ext::types::ExtType>()?;
     m.add_class::<ext::types::Symbol>()?;
+    m.add_class::<ext::types::TypeVar>()?;
     Ok(())
 }
 

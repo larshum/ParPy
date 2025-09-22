@@ -46,6 +46,19 @@ pub fn to_struct_def(
     Ok(Top::StructDef {id, fields, i: Info::default()})
 }
 
+fn to_ir_elem_size(
+    sz: py_ast::TensorElemSize,
+    i: &Info
+) -> CompileResult<ElemSize> {
+    match sz {
+        py_ast::TensorElemSize::Fixed {sz} => Ok(sz),
+        py_ast::TensorElemSize::Variable {id} => {
+            parpy_compile_error!(i, "Encountered unresolved type variable {id} \
+                                     when translating to IR AST")
+        }
+    }
+}
+
 fn to_ir_type(
     env: &IREnv,
     i: &Info,
@@ -59,6 +72,7 @@ fn to_ir_type(
             let shape = shape.into_iter()
                 .map(|sh| sh.extract_num())
                 .collect::<Option<Vec<i64>>>();
+            let sz = to_ir_elem_size(sz, &i)?;
             match shape {
                 Some(sh) => Ok(Type::Tensor {sz, shape: sh}),
                 None => parpy_compile_error!(i, "Encountered unresolved shape \

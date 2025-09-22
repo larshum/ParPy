@@ -18,15 +18,19 @@ use pyo3::types::*;
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialOrd, Ord, PartialEq, Eq)]
-struct UnifyEnv {
-    id: Name,
-    shape_vars: BTreeMap<Name, i64>,
+pub struct UnifyEnv {
+    pub id: Name,
+    pub shape_vars: BTreeMap<Name, i64>,
+    pub type_vars: BTreeMap<Name, ElemSize>,
 }
 
 impl UnifyEnv {
     fn new(id: Option<&Name>) -> UnifyEnv {
-        let id = id.cloned().unwrap_or(Name::sym_str(""));
-        UnifyEnv {id: id, shape_vars: BTreeMap::new()}
+        UnifyEnv {
+            id: id.cloned().unwrap_or(Name::sym_str("")),
+            shape_vars: BTreeMap::new(),
+            type_vars: BTreeMap::new()
+        }
     }
 
     fn lookup_shape_symbol(&self, id: &Name) -> Option<i64> {
@@ -35,6 +39,15 @@ impl UnifyEnv {
 
     fn insert_shape_symbol(mut self, id: Name, n: i64) -> Self {
         self.shape_vars.insert(id, n);
+        self
+    }
+
+    fn lookup_type_variable(&self, id: &Name) -> Option<ElemSize> {
+        self.type_vars.get(id).cloned()
+    }
+
+    fn insert_type_variable(mut self, id: Name, sz: ElemSize) -> Self {
+        self.type_vars.insert(id, sz);
         self
     }
 }
@@ -59,6 +72,77 @@ fn unify_elem_size(l: ElemSize, r: ElemSize, i: &Info) -> PyResult<ElemSize> {
         (ElemSize::F32, _) if r.is_floating_point() => Ok(r),
         (ElemSize::F64, _) if r.is_floating_point() => Ok(l),
         _ => py_type_error!(i, "Incompatible element types {l} and {r}")
+    }
+}
+
+fn unify_tensor_elem_size(
+    env: UnifyEnv,
+    l: TensorElemSize,
+    r: TensorElemSize,
+    i: &Info
+) -> PyResult<(UnifyEnv, TensorElemSize)> {
+    match (l, r) {
+        (TensorElemSize::Fixed {sz: lsz}, TensorElemSize::Fixed {sz: rsz}) => {
+            let sz = unify_elem_size(lsz.clone(), rsz.clone(), &i)?;
+            Ok((env, TensorElemSize::Fixed {sz}))
+        },
+        (TensorElemSize::Fixed {sz}, TensorElemSize::Variable {id}) |
+        (TensorElemSize::Variable {id}, TensorElemSize::Fixed {sz}) => {
+            match env.lookup_type_variable(&id) {
+                Some(var_sz) => match unify_elem_size(sz.clone(), var_sz.clone(), &i) {
+                    Ok(res_sz) => Ok((env, TensorElemSize::Fixed {sz: res_sz})),
+                    Err(_) => py_type_error!(i, "Failed to unify type variable \
+                                                 {id} = {var_sz} with {sz}.")
+                },
+                None => {
+                    let env = env.insert_type_variable(id, sz.clone());
+                    Ok((env, TensorElemSize::Fixed {sz}))
+                }
+            }
+        },
+        (TensorElemSize::Variable {id: lid}, TensorElemSize::Variable {id: rid}) => {
+            match (env.lookup_type_variable(&lid), env.lookup_type_variable(&rid)) {
+                (Some(l), Some(r)) => {
+                    match unify_elem_size(l.clone(), r.clone(), &i) {
+                        Ok(sz) => Ok((env, TensorElemSize::Fixed {sz})),
+                        Err(_) => py_type_error!(i, "Failed to unify type variables \
+                                                     {lid} = {l} and {rid} = {r}.")
+                    }
+                },
+                (None, Some(sz)) => {
+                    let env = env.insert_type_variable(lid, sz.clone());
+                    Ok((env, TensorElemSize::Fixed {sz}))
+                },
+                (Some(sz), None) => {
+                    let env = env.insert_type_variable(rid, sz.clone());
+                    Ok((env, TensorElemSize::Fixed {sz}))
+                },
+                (None, None) => {
+                    py_internal_error!(i, "Failed to unify unbound type variables \
+                                           {lid} and {rid}.")
+                }
+            }
+        }
+    }
+}
+
+fn eq_tensor_elem_size(
+    env: &UnifyEnv,
+    l: &TensorElemSize,
+    r: &TensorElemSize
+) -> Option<TensorElemSize> {
+    let extract_elem_size = |tsz| match tsz {
+        TensorElemSize::Fixed {sz} => Some(sz),
+        TensorElemSize::Variable {id} => env.lookup_type_variable(&id)
+    };
+    let lsz = extract_elem_size(l.clone());
+    let rsz = extract_elem_size(r.clone());
+    match (lsz, rsz) {
+        (Some(l), Some(r)) if l == r => Some(TensorElemSize::Fixed {sz: l.clone()}),
+        (Some(sz), None) | (None, Some(sz)) => {
+            Some(TensorElemSize::Fixed {sz: sz.clone()})
+        }
+        _ => None
     }
 }
 
@@ -104,7 +188,7 @@ fn unify_shape(
                     Ok((env, TensorShape::Num {n}))
                 },
                 (None, None) => {
-                    py_internal_error!(i, "Cannot unify unresolved shape \
+                    py_internal_error!(i, "Failed to unify unresolved shape \
                                            symbols {lid} and {rid}.")
                 }
             }
@@ -149,14 +233,20 @@ fn unify_types(
         ( Type::Tensor {sz: lsz, shape: lshape}
         , Type::Tensor {sz: rsz, shape: rshape} ) => {
             if lshape.is_empty() && rshape.is_empty() {
-                let sz = unify_elem_size(lsz, rsz, i)?;
+                let (env, sz) = unify_tensor_elem_size(env, lsz, rsz, i)?;
                 Ok((env, Type::Tensor {sz, shape: vec![]}))
-            } else if lsz == rsz {
-                let (env, shape) = unify_shapes(env, lshape, rshape, i)?;
-                Ok((env, Type::Tensor {sz: lsz, shape}))
             } else {
-                py_type_error!(i, "Failed to unify non-scalar tensors containing \
-                                   distinct element sizes {lsz} and {rsz}.")
+                match eq_tensor_elem_size(&env, &lsz, &rsz) {
+                    Some(sz) => {
+                        let (env, shape) = unify_shapes(env, lshape, rshape, i)?;
+                        Ok((env, Type::Tensor {sz, shape}))
+                    },
+                    None => {
+                        py_type_error!(i, "Failed to unify non-scalar tensors \
+                                           containing distinct element sizes \
+                                           {lsz} and {rsz}.")
+                    }
+                }
             }
         },
         (Type::Tuple {elems: lelems}, Type::Tuple {elems: relems}) => {
@@ -211,14 +301,24 @@ fn unify_parameter_type(
     let (env, ty) = match unify_types(env.clone(), ty.clone(), arg_type.clone(), &i) {
         Ok((env, ty)) => Ok((env, ty)),
         Err(_) => {
-            let vars = env.shape_vars.into_iter()
-                .map(|(id, n)| {
-                    format!("{} = {n}", TensorShape::Symbol {id}.pprint_default())
-                })
-                .join(", ");
+            let where_str = if env.shape_vars.is_empty() && env.type_vars.is_empty() {
+                "".to_string()
+            } else {
+                let shapes = env.shape_vars.into_iter()
+                    .map(|(id, n)| {
+                        format!("  {} = {n}", TensorShape::Symbol {id}.pprint_default())
+                    });
+                let types = env.type_vars.into_iter()
+                    .map(|(id, sz)| {
+                        let id = TensorElemSize::Variable {id}.pprint_default();
+                        format!("  {id} = {sz}")
+                    });
+                let vars = shapes.chain(types).join("\n");
+                format!("Where\n{vars}")
+            };
             py_type_error!(i, "Parameter {id} was annotated with type {ty} \
-                               which is incompatible with argument type {arg_type}.\n
-                               Where {vars}")
+                               which is incompatible with argument type {arg_type}.\
+                               {where_str}")
         }
     }?;
     params.push(Param {id, ty, i});
@@ -349,7 +449,7 @@ fn extract_type<'py>(
     let ty = arg.get_type();
     if arg.is_instance(&buffer.getattr("Buffer")?)? {
         let dtype = arg.getattr("dtype")?.extract::<DataType>()?;
-        let sz = dtype.sz;
+        let sz = TensorElemSize::Fixed {sz: dtype.sz};
         let shape = arg.getattr("shape")?
             .extract::<Vec<i64>>()?
             .into_iter()
@@ -357,11 +457,11 @@ fn extract_type<'py>(
             .collect::<Vec<TensorShape>>();
         Ok(Type::Tensor {sz, shape})
     } else if arg.is_instance(&PyBool::type_object(py))? {
-        Ok(Type::Tensor {sz: ElemSize::Bool, shape: vec![]})
+        Ok(Type::fixed_scalar(ElemSize::Bool))
     } else if arg.is_instance(&PyInt::type_object(py))? {
-        Ok(Type::Tensor {sz: scalar_sizes.int.clone(), shape: vec![]})
+        Ok(Type::fixed_scalar(scalar_sizes.int.clone()))
     } else if arg.is_instance(&PyFloat::type_object(py))? {
-        Ok(Type::Tensor {sz: scalar_sizes.float.clone(), shape: vec![]})
+        Ok(Type::fixed_scalar(scalar_sizes.float.clone()))
     } else if arg.is_instance(&PyDict::type_object(py))? {
         let fields = arg.call_method0("items")?
             .try_iter()?
@@ -397,24 +497,31 @@ fn coerce_type(e: Expr, expected_ty: &Type) -> PyResult<Expr> {
         match (actual, expected_ty) {
             (Type::Tensor {sz: lsz, shape: lsh}, Type::Tensor {sz: rsz, shape: rsh}) => {
                 if lsh.is_empty() && rsh.is_empty() {
-                    // If we can unify the two types, it means they are compatible with one
-                    // another. In this case, we convert the expression to the expected type.
-                    // Otherwise, the coercion fails.
-                    match unify_elem_size(lsz.clone(), rsz.clone(), &i) {
-                        Ok(_) => {
-                            let ty = Type::Tensor {sz: rsz.clone(), shape: vec![]};
-                            Ok(Expr::Convert {e: Box::new(e), ty})
-                        },
-                        Err(_) => py_type_error!(i, "Cannot coerce element size {lsz} to {rsz}.")
-                    }
-                } else if lsz == rsz {
-                    // If the shapes of the two sides can be unified, that means each shape symbol
-                    // can be coerced to a unique value.
+                    // If the two element sizes are considered equal, a coercion is not needed.
+                    // Otherwise, if the types can be unified by coercing either element size, then
+                    // we insert an explicit type conversion.
                     let unify_env = UnifyEnv::new(None);
-                    let _ = unify_shapes(unify_env, lsh.clone(), rsh.clone(), &i)?;
-                    Ok(e)
+                    if let Some(_) = eq_tensor_elem_size(&unify_env, &lsz, &rsz) {
+                        Ok(e)
+                    } else {
+                        match unify_tensor_elem_size(unify_env, lsz.clone(), rsz.clone(), &i) {
+                            Ok(_) => {
+                                let ty = Type::Tensor {sz: rsz.clone(), shape: vec![]};
+                                Ok(Expr::Convert {e: Box::new(e), ty})
+                            },
+                            Err(_) => py_type_error!(i, "Cannot coerce element size {lsz} to {rsz}.")
+                        }
+                    }
                 } else {
-                    py_type_error!(i, "Cannot coerce non-empty tensor of element size {lsz} to {rsz}.")
+                    let unify_env = UnifyEnv::new(None);
+                    if let Some(_) = eq_tensor_elem_size(&unify_env, &lsz, &rsz) {
+                        // If the shapes of the two sides can be unified, that means each shape symbol
+                        // can be coerced to a unique value.
+                        let _ = unify_shapes(unify_env, lsh.clone(), rsh.clone(), &i)?;
+                        Ok(e)
+                    } else {
+                        py_type_error!(i, "Cannot coerce non-empty tensor of element size {lsz} to {rsz}.")
+                    }
                 }
             },
             (Type::Tuple {..}, Type::Tuple {elems: r}) => {
@@ -493,7 +600,7 @@ fn ensure_conditional_type(cond: Expr) -> PyResult<Expr> {
             lhs: Box::new(cond),
             op: BinOp::Neq,
             rhs: Box::new(Expr::Int {v: 0, ty: cond_ty.clone(), i: i.clone()}),
-            ty: Type::Tensor {sz: ElemSize::Bool, shape: vec![]},
+            ty: Type::fixed_scalar(ElemSize::Bool),
             i
         })
     } else {
@@ -553,7 +660,7 @@ fn type_check_binop(
         },
         BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq |
         BinOp::Lt | BinOp::Gt if ty.is_scalar() => {
-            Ok(Type::Tensor {sz: ElemSize::Bool, shape: vec![]})
+            Ok(Type::fixed_scalar(ElemSize::Bool))
         },
         BinOp::Max | BinOp::Min if ty.is_int_scalar() || ty.is_float_scalar() => {
             Ok(ty)
@@ -612,7 +719,7 @@ fn type_check_tensor_indexing<'py>(
     i: Info
 ) -> TypeCheckResult<'py, Expr> {
     // Add coercion of each component index of the index expression.
-    let int_ty = Type::Tensor {sz: env.scalar_sizes.int.clone(), shape: vec![]};
+    let int_ty = Type::fixed_scalar(env.scalar_sizes.int.clone());
     let expected_index_type = match idx.get_type() {
         Type::Tensor {shape, ..} if shape.len() == 0 => Ok(int_ty),
         Type::Tuple {elems} => {
@@ -672,15 +779,15 @@ impl TypeCheck for Expr {
                 Ok((env, Expr::String {v, ty: Type::String, i}))
             },
             Expr::Bool {v, ty: _, i} => {
-                let ty = Type::Tensor {sz: ElemSize::Bool, shape: vec![]};
+                let ty = Type::fixed_scalar(ElemSize::Bool);
                 Ok((env, Expr::Bool {v, ty, i}))
             },
             Expr::Int {v, ty: _, i} => {
-                let ty = Type::Tensor {sz: env.scalar_sizes.int.clone(), shape: vec![]};
+                let ty = Type::fixed_scalar(env.scalar_sizes.int.clone());
                 Ok((env, Expr::Int {v, ty, i}))
             },
             Expr::Float {v, ty: _, i} => {
-                let ty = Type::Tensor {sz: env.scalar_sizes.float.clone(), shape: vec![]};
+                let ty = Type::fixed_scalar(env.scalar_sizes.float.clone());
                 Ok((env, Expr::Float {v, ty, i}))
             },
             Expr::UnOp {op, arg, ty: _, i} => {
@@ -739,7 +846,7 @@ impl TypeCheck for Expr {
                 let (env, hi) = type_check_boxed(env, hi)?;
                 // NOTE(larshum, 2025-09-12): Slices are considered as integers. Assuming they are
                 // never used outside of indexing (we cannot parse such Python code), this is fine.
-                let ty = Type::Tensor {sz: env.scalar_sizes.int.clone(), shape: vec![]};
+                let ty = Type::fixed_scalar(env.scalar_sizes.int.clone());
                 Ok((env, Expr::Slice {lo, hi, ty, i}))
             },
             Expr::Tuple {elems, ty: _, i} => {
@@ -791,7 +898,7 @@ impl TypeCheck for Stmt {
             Stmt::For {var, lo, hi, step, body, labels, i} => {
                 let (env, lo) = lo.type_check(env)?;
                 let (env, hi) = hi.type_check(env)?;
-                let int_ty = Type::Tensor {sz: env.scalar_sizes.int.clone(), shape: vec![]};
+                let int_ty = Type::fixed_scalar(env.scalar_sizes.int.clone());
                 let lo = coerce_type(lo, &int_ty)?;
                 let hi = coerce_type(hi, &int_ty)?;
                 let env = env.insert_var(&var, &int_ty)?;
@@ -920,7 +1027,7 @@ fn type_check_fun_def<'py>(
 
             // 2. Specialize the function body by replacing expressions according to the
             //    environment.
-            let body = specialize::apply(&unify_env.shape_vars, def.body);
+            let body = specialize::apply(&unify_env, def.body);
 
             // 3. Apply constant folding to the function body, to ensure that slice bounds can be
             //    determined given the shapes.
@@ -1108,7 +1215,7 @@ mod test {
         let lsh = ts_sym(id("x"));
         let rsh = ts_sym(id("y"));
         let r = unify_shape(env, lsh, rsh, &i());
-        assert_py_error_matches(r, "Cannot unify unresolved shape symbols x and y.");
+        assert_py_error_matches(r, "Failed to unify unresolved shape symbols x and y.");
     }
 
     #[test]
@@ -1184,18 +1291,18 @@ mod test {
     #[test]
     fn unify_non_empty_tensor_types() {
         let env = mk_unify_env();
-        let lty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]};
-        let rty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_sym(id("x"))]};
+        let lty = Type::Tensor {sz: fixed_elem_sz(ElemSize::I32), shape: vec![ts_num(10)]};
+        let rty = Type::Tensor {sz: fixed_elem_sz(ElemSize::I32), shape: vec![ts_sym(id("x"))]};
         let (env, r) = unify_types(env, lty, rty, &i()).unwrap();
         assert_eq!(env.shape_vars.get(&id("x")).cloned(), Some(10));
-        assert_eq!(r, Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]});
+        assert_eq!(r, Type::Tensor {sz: fixed_elem_sz(ElemSize::I32), shape: vec![ts_num(10)]});
     }
 
     #[test]
     fn unify_non_empty_distinct_tensor_types_fails() {
         let env = mk_unify_env();
-        let lty = Type::Tensor {sz: ElemSize::I32, shape: vec![ts_num(10)]};
-        let rty = Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(10)]};
+        let lty = Type::Tensor {sz: fixed_elem_sz(ElemSize::I32), shape: vec![ts_num(10)]};
+        let rty = Type::Tensor {sz: fixed_elem_sz(ElemSize::I64), shape: vec![ts_num(10)]};
         let r = unify_types(env, lty, rty, &i());
         assert_py_error_matches(r, "Failed to unify non-scalar tensors .*");
     }
@@ -1270,6 +1377,36 @@ mod test {
     }
 
     #[test]
+    fn unify_type_variable_with_known() {
+        let env = mk_unify_env();
+        let id = Name::sym_str("");
+        let lty = scalar(ElemSize::F32);
+        let rty = Type::Tensor {
+            sz: TensorElemSize::Variable {id: id.clone()},
+            shape: vec![]
+        };
+        let (env, ty) = unify_types(env, lty, rty, &i()).unwrap();
+        assert_eq!(env.type_vars.len(), 1);
+        assert!(env.type_vars.contains_key(&id));
+        assert_eq!(ty, scalar(ElemSize::F32));
+    }
+
+    #[test]
+    fn unify_unknown_type_variables_fails() {
+        let env = mk_unify_env();
+        let lty = Type::Tensor {
+            sz: TensorElemSize::Variable {id: id("a")},
+            shape: vec![]
+        };
+        let rty = Type::Tensor {
+            sz: TensorElemSize::Variable {id: id("b")},
+            shape: vec![]
+        };
+        let r = unify_types(env, lty, rty, &i());
+        assert_py_error_matches(r, "Failed to unify unbound type variables a and b.");
+    }
+
+    #[test]
     fn unify_parameters_no_annot() {
         let params = vec![
             Param {id: id("x"), ty: Type::Unknown, i: i()},
@@ -1277,14 +1414,17 @@ mod test {
         ];
         let arg_types = vec![
             scalar(ElemSize::F32),
-            Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]}
+            Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_num(10)]}
         ];
         let (_, r) = unify_parameter_types(params, arg_types, &id("f"), &i()).unwrap();
         let expected = vec![
             Param {id: id("x"), ty: scalar(ElemSize::F32), i: i()},
             Param {
                 id: id("y"),
-                ty: Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]},
+                ty: Type::Tensor {
+                    sz: fixed_elem_sz(ElemSize::F32),
+                    shape: vec![ts_num(10)]
+                },
                 i: i()
             }
         ];
@@ -1293,14 +1433,17 @@ mod test {
 
     #[test]
     fn unify_parameters_incompatible_annot_fails() {
-        let ty = Type::Tensor {sz: ElemSize::I64, shape: vec![ts_sym(id("x"))]};
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::I64),
+            shape: vec![ts_sym(id("x"))]
+        };
         let params = vec![
             Param {id: id("a"), ty: ty.clone(), i: i()},
             Param {id: id("b"), ty: ty.clone(), i: i()},
         ];
         let arg_types = vec![
-            Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(10)]},
-            Type::Tensor {sz: ElemSize::I64, shape: vec![ts_num(20)]},
+            Type::Tensor {sz: fixed_elem_sz(ElemSize::I64), shape: vec![ts_num(10)]},
+            Type::Tensor {sz: fixed_elem_sz(ElemSize::I64), shape: vec![ts_num(20)]},
         ];
         let r = unify_parameter_types(params, arg_types, &id("f"), &i());
         assert_py_error_matches(r, "Parameter b was annotated with type .* \
@@ -1404,7 +1547,7 @@ mod test {
     }
 
     #[test]
-    fn coerce_types_i32_i64() {
+    fn coerce_type_i32_i64() {
         let ty = scalar(ElemSize::I64);
         let e = int(2, Some(ElemSize::I32));
         let expected = convert(e.clone(), ty.clone());
@@ -1412,7 +1555,7 @@ mod test {
     }
 
     #[test]
-    fn coerce_types_i64_i32() {
+    fn coerce_type_i64_i32() {
         let ty = scalar(ElemSize::I32);
         let e = int(2, Some(ElemSize::I64));
         let expected = convert(e.clone(), ty.clone());
@@ -1420,39 +1563,59 @@ mod test {
     }
 
     #[test]
-    fn coerce_types_float_to_int_fails() {
+    fn coerce_type_float_to_int_fails() {
         let ty = scalar(ElemSize::I32);
         let e = float(2.5, Some(ElemSize::F32));
         assert_py_error_matches(coerce_type(e, &ty), "Cannot coerce element size .* to .*");
     }
 
     #[test]
-    fn coerce_types_non_empty_tensor_distinct_types_fails() {
-        let ty = Type::Tensor {sz: ElemSize::F64, shape: vec![ts_num(10)]};
-        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]});
+    fn coerce_type_non_empty_tensor_distinct_types_fails() {
+        let ty = Type::Tensor {sz: fixed_elem_sz(ElemSize::F64), shape: vec![ts_num(10)]};
+        let e = var("x", Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_num(10)]});
         assert_py_error_matches(coerce_type(e, &ty), "Cannot coerce non-empty tensor of element size .* to .*");
     }
 
     #[test]
-    fn coerce_types_non_empty_tensor_distinct_shapes_fails() {
-        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(12)]};
-        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]});
+    fn coerce_type_non_empty_tensor_distinct_shapes_fails() {
+        let ty = Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_num(12)]};
+        let e = var("x", Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_num(10)]});
         assert_py_error_matches(coerce_type(e, &ty), "Failed to unify distinct dimensions 10 and 12.");
     }
 
     #[test]
-    fn coerce_types_non_empty_tensor_variable() {
-        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10)]};
-        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_sym(id("N"))]});
+    fn coerce_type_non_empty_tensor_variable() {
+        let ty = Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_num(10)]};
+        let e = var("x", Type::Tensor {sz: fixed_elem_sz(ElemSize::F32), shape: vec![ts_sym(id("N"))]});
         let expected = var("x", ty.clone());
         assert_eq!(coerce_type(e, &ty).unwrap(), expected);
     }
 
     #[test]
-    fn coerce_types_non_empty_tensor() {
-        let ty = Type::Tensor {sz: ElemSize::F32, shape: vec![ts_num(10), ts_num(12)]};
-        let e = var("x", Type::Tensor {sz: ElemSize::F32, shape: vec![ts_sym(id("N")), ts_sym(id("N"))]});
+    fn coerce_type_non_empty_tensor() {
+        let ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::F32),
+            shape: vec![ts_num(10), ts_num(12)]
+        };
+        let var_ty = Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::F32),
+            shape: vec![ts_sym(id("N")), ts_sym(id("N"))]
+        };
+        let e = var("x", var_ty);
         assert_py_error_matches(coerce_type(e, &ty), "Failed to unify shape variable N.*with");
+    }
+
+    #[test]
+    fn coerce_type_type_variable_no_coercion() {
+        let ty = Type::Tensor {
+            sz: TensorElemSize::Variable {id: id("sz")},
+            shape: vec![]
+        };
+        let e = var("x", Type::Tensor {
+            sz: fixed_elem_sz(ElemSize::F32),
+            shape: vec![]
+        });
+        assert_eq!(coerce_type(e.clone(), &ty).unwrap(), e);
     }
 
     #[test]
@@ -1521,12 +1684,11 @@ mod test {
         let target = var("x", Type::Unknown);
         let index = tuple(vec![slice(None, None), int(4, None), slice(None, None)]);
         let e = subscript(target, index, Type::Unknown);
-        let params = vec![
-            Param {
-                id: id("x"), ty: Type::Tensor {sz: ElemSize::F32, shape: target_shape},
-                i: i()
-            }
-        ];
+        let ty = Type::Tensor {
+            sz: TensorElemSize::Fixed {sz: ElemSize::F32},
+            shape: target_shape
+        };
+        let params = vec![Param {id: id("x"), ty, i: i()}];
         let env = mk_tcenv(params);
         let (_, e) = e.type_check(env).unwrap();
         assert_eq!(e.get_type().clone(), scalar(ElemSize::F32));

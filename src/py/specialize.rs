@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::type_check::UnifyEnv;
 use crate::utils::name::Name;
 use crate::utils::smap::*;
 
@@ -9,8 +10,10 @@ struct SpecEnv<'a> {
 }
 
 impl<'a> SpecEnv<'a> {
-    fn new(shape_map: &'a BTreeMap<Name, i64>) -> SpecEnv<'a> {
-        SpecEnv { shape_map }
+    fn new(unify_env: &'a UnifyEnv) -> SpecEnv<'a> {
+        SpecEnv {
+            shape_map: &unify_env.shape_vars
+        }
     }
 }
 
@@ -38,9 +41,9 @@ fn specialize_stmt<'a>(
 }
 
 pub fn apply<'py>(
-    shape_map: &BTreeMap<Name, i64>,
+    unify_env: &UnifyEnv,
     body: Vec<Stmt>
 ) -> Vec<Stmt> {
-    let env = SpecEnv::new(shape_map);
+    let env = SpecEnv::new(unify_env);
     body.smap(|s| specialize_stmt(&env, s))
 }

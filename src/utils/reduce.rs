@@ -20,7 +20,7 @@ pub trait ExprLit {
 
 impl ExprLit for py_ast::Expr {
     fn generate_literal(v: f64, sz: &ElemSize, i: Info) -> py_ast::Expr {
-        let ty = py_ast::Type::Tensor {sz: sz.clone(), shape: vec![]};
+        let ty = py_ast::Type::fixed_scalar(sz.clone());
         match sz {
             ElemSize::Bool => {
                 py_ast::Expr::Bool {v: py_ast::Expr::to_bool_lit(v), ty, i}
