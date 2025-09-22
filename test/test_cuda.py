@@ -224,3 +224,41 @@ def test_block_parallel_external_cuda():
         sum_rows_using_ext(out, x, 10, opts=opts)
         assert torch.allclose(out, torch.sum(x, dim=1))
     run_if_backend_is_enabled(backend, helper)
+
+def test_call_matmul_external_cuda():
+    def helper():
+        N, M, K = types.symbol(), types.symbol(), types.symbol()
+        float_sz = types.type_var()
+
+        @parpy.external(
+                "matmul_template_float", backend, parpy.Target.Device,
+                header="<cuda_utils.h>", parallelize=parpy.threads(32))
+        def matmul_ext_f32(
+            A: types.buffer(parpy.types.F32, [N, K]),
+            B: types.buffer(parpy.types.F32, [K, M]),
+            C: types.buffer(parpy.types.F32, [N, M]),
+            N: types.I64,
+            M: types.I64,
+            K: types.I64
+        ) -> types.I64:
+            pass
+
+        @parpy.jit
+        def matmul_wrap(
+            A: types.buffer(float_sz, [N, K]),
+            B: types.buffer(float_sz, [K, M]),
+            C: types.buffer(float_sz, [N, M])):
+            with parpy.gpu:
+                _ = matmul_ext_f32(A, B, C, N, M, K)
+
+        A = np.ndarray((10, 12), np.float32)
+        B = np.ndarray((12, 15), np.float32)
+        C = np.ndarray((10, 15), np.float32)
+        opts = par_opts(backend, {})
+        opts.includes += ['test/code']
+        matmul_wrap(A, B, C, opts=opts)
+
+        with pytest.raises(TypeError) as e_info:
+            matmul_wrap(B, A, C, opts=opts)
+        assert e_info.match("Parameter .* was annotated with type .* incompatible with .*")
+    run_if_backend_is_enabled(backend, helper)
