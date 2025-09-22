@@ -36,7 +36,8 @@ fn replace_constants_expr(
         Expr::String {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
         Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
         Expr::IfExpr {..} | Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
-        Expr::Builtin {..} | Expr::Convert {..} =>
+        Expr::Builtin {..} | Expr::Convert {..} | Expr::GpuContext {..} |
+        Expr::Label {..} =>
             e.smap(|e| replace_constants_expr(consts, e))
     }
 }

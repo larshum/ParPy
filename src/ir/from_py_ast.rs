@@ -356,6 +356,12 @@ fn to_ir_expr(
             let ty = to_ir_type(env, &i, ty)?;
             Ok(Expr::Convert {e, ty})
         },
+        py_ast::Expr::GpuContext {i, ..} => {
+            parpy_internal_error!(i, "Found intermediate GpuContext expression in IR translation")
+        },
+        py_ast::Expr::Label {i, ..} => {
+            parpy_internal_error!(i, "Found intermediate Label expression in IR translation")
+        },
     }
 }
 

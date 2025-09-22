@@ -123,7 +123,8 @@ impl Symbolize for Expr {
             Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
             Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
-            Expr::Slice {..} | Expr::Tuple {..} | Expr::Builtin {..} => {
+            Expr::Slice {..} | Expr::Tuple {..} | Expr::Builtin {..} |
+            Expr::GpuContext {..} | Expr::Label {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }

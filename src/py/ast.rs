@@ -175,6 +175,8 @@ pub enum Expr {
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
     Builtin {func: Builtin, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type},
+    GpuContext {ty: Type, i: Info},
+    Label {label: String, ty: Type, i: Info},
 }
 
 impl Expr {
@@ -193,8 +195,10 @@ impl Expr {
             Expr::Slice {..} => 10,
             Expr::Tuple {..} => 11,
             Expr::Call {..} => 12,
-            Expr::Builtin {..} => 13,
-            Expr::Convert {..} => 14,
+            Expr::Builtin {..} => 20,
+            Expr::Convert {..} => 13,
+            Expr::GpuContext {..} => 14,
+            Expr::Label {..} => 15,
         }
     }
 
@@ -215,6 +219,8 @@ impl Expr {
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
             Expr::Builtin {func, args, ty, ..} => Expr::Builtin {func, args, ty, i},
             Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
+            Expr::GpuContext {ty, ..} => Expr::GpuContext {ty, i},
+            Expr::Label {label, ty, ..} => Expr::Label {label, ty, i},
         }
     }
 }
@@ -237,6 +243,8 @@ impl ExprType<Type> for Expr {
             Expr::Call {ty, ..} => ty,
             Expr::Builtin {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
+            Expr::GpuContext {ty, ..} => ty,
+            Expr::Label {ty, ..} => ty,
         }
     }
 
@@ -247,7 +255,7 @@ impl ExprType<Type> for Expr {
             Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
             Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
             Expr::Tuple {..} | Expr::Call {..} | Expr::Builtin {..} |
-            Expr::Convert {..} => false,
+            Expr::Convert {..} | Expr::GpuContext {..} | Expr::Label {..} => false,
         }
     }
 }
@@ -322,6 +330,8 @@ impl InfoNode for Expr {
             Expr::Call {i, ..} => i.clone(),
             Expr::Builtin {i, ..} => i.clone(),
             Expr::Convert {e, ..} => e.get_info(),
+            Expr::GpuContext {i, ..} => i.clone(),
+            Expr::Label {i, ..} => i.clone(),
         }
     }
 }
@@ -391,7 +401,8 @@ impl SMapAccum<Expr> for Expr {
                 Ok((acc, Expr::Convert {e: Box::new(e), ty}))
             },
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
-            Expr::Int {..} | Expr::Float {..} => {
+            Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |
+            Expr::Label {..} => {
                 Ok((acc?, self))
             },
         }
@@ -416,7 +427,8 @@ impl SFold<Expr> for Expr {
             Expr::Builtin {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
-            Expr::Int {..} | Expr::Float {..} => acc
+            Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |
+            Expr::Label {..} => acc
         }
     }
 }

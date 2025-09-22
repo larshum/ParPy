@@ -248,7 +248,9 @@ impl PrettyPrint for Expr {
                 let (env, e) = e.pprint(env);
                 let (env, ty) = ty.pprint(env);
                 (env, format!("{ty}({e})"))
-            }
+            },
+            Expr::GpuContext {..} => (env, format!("<gpu_context>")),
+            Expr::Label {label, ..} => (env, format!("<label({label})>")),
         }
     }
 

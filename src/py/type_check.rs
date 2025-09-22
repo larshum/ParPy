@@ -873,6 +873,7 @@ impl TypeCheck for Expr {
                 let (env, e) = e.type_check(env)?;
                 Ok((env, Expr::Convert {e: Box::new(e), ty}))
             },
+            Expr::GpuContext {..} | Expr::Label {..} => Ok((env, self))
         }
     }
 }
