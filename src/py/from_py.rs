@@ -213,7 +213,7 @@ fn convert_type_conversion_builtin<'py, 'a>(
             Err(_) => py_runtime_error!(i, "First argument of conversion builtin \
                                             must be an expression.")
         }?;
-        Ok(Expr::Convert {e: Box::new(e), ty})
+        Ok(Expr::Convert {e: Box::new(e), ty, i})
     } else {
         py_runtime_error!(i, "Type conversion expects two arguments but found {n}")
     }
@@ -241,67 +241,65 @@ fn convert_builtin<'py, 'a>(
     args: Vec<Bound<'py, PyAny>>,
     env: &ConvertEnv<'py, 'a>,
     i: Info
-) -> PyResult<Expr> {
+) -> PyResult<Option<Expr>> {
     let py = func.py();
     let parpy = py.import("parpy")?;
     let parpy_ops = parpy.getattr("operators")?;
     match eval_node(&func, &env, py) {
         Ok(e) => {
             // Constants
-            if e.eq(parpy_ops.getattr("inf")?)? {
-                Ok(Expr::Float {v: f64::INFINITY, ty: Type::Unknown, i})
+            let res = if e.eq(parpy_ops.getattr("inf")?)? {
+                Some(Expr::Float {v: f64::INFINITY, ty: Type::Unknown, i})
 
             // Unary and binary operators
             } else if e.eq(parpy_ops.getattr("abs")?)? {
-                convert_unary_builtin(UnOp::Abs, args, env, i)
+                Some(convert_unary_builtin(UnOp::Abs, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("atan2")?)? {
-                convert_binary_builtin(BinOp::Atan2, args, env, i)
+                Some(convert_binary_builtin(BinOp::Atan2, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("cos")?)? {
-                convert_unary_builtin(UnOp::Cos, args, env, i)
+                Some(convert_unary_builtin(UnOp::Cos, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("exp")?)? {
-                convert_unary_builtin(UnOp::Exp, args, env, i)
+                Some(convert_unary_builtin(UnOp::Exp, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("log")?)? {
-                convert_unary_builtin(UnOp::Log, args, env, i)
+                Some(convert_unary_builtin(UnOp::Log, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("maximum")?)? {
-                convert_binary_builtin(BinOp::Max, args, env, i)
+                Some(convert_binary_builtin(BinOp::Max, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("minimum")?)? {
-                convert_binary_builtin(BinOp::Min, args, env, i)
+                Some(convert_binary_builtin(BinOp::Min, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("sin")?)? {
-                convert_unary_builtin(UnOp::Sin, args, env, i)
+                Some(convert_unary_builtin(UnOp::Sin, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("sqrt")?)? {
-                convert_unary_builtin(UnOp::Sqrt, args, env, i)
+                Some(convert_unary_builtin(UnOp::Sqrt, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("tanh")?)? {
-                convert_unary_builtin(UnOp::Tanh, args, env, i)
+                Some(convert_unary_builtin(UnOp::Tanh, args, env, i)?)
 
             // Reduction operators
             } else if e.eq(parpy_ops.getattr("max")?)? {
-                convert_reduction_builtin(ReduceOp::Max, args, env, i)
+                Some(convert_reduction_builtin(ReduceOp::Max, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("min")?)? {
-                convert_reduction_builtin(ReduceOp::Min, args, env, i)
+                Some(convert_reduction_builtin(ReduceOp::Min, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("prod")?)? {
-                convert_reduction_builtin(ReduceOp::Prod, args, env, i)
+                Some(convert_reduction_builtin(ReduceOp::Prod, args, env, i)?)
             } else if e.eq(parpy_ops.getattr("sum")?)? {
-                convert_reduction_builtin(ReduceOp::Sum, args, env, i)
+                Some(convert_reduction_builtin(ReduceOp::Sum, args, env, i)?)
 
             // Type conversion
             } else if e.eq(parpy_ops.getattr("convert")?)? {
-                convert_type_conversion_builtin(args, env, i)
+                Some(convert_type_conversion_builtin(args, env, i)?)
 
             // GPU context (only usable in a 'with' statement)
             } else if e.eq(parpy_ops.getattr("gpu")?)? {
-                Ok(Expr::GpuContext {ty: Type::Unknown, i})
+                Some(Expr::GpuContext {ty: Type::Unknown, i})
 
             // Labeling (only usable as a statement)
             } else if e.eq(parpy_ops.getattr("label")?)? {
-                convert_label_builtin(args, env, i)
+                Some(convert_label_builtin(args, env, i)?)
             } else {
-                py_runtime_error!(i, "Unknown built-in operator {func}")
-            }
+                None
+            };
+            Ok(res)
         },
-        Err(e) => {
-            py_runtime_error!(i, "Failed to identify builtin operator {func}\n\
-                                  Error when evaluating: {e}")
-        }
+        Err(_) => Ok(None)
     }
 }
 
@@ -357,7 +355,7 @@ fn convert_expr<'py, 'a>(
     let i = extract_info(&expr, env);
     let ty = Type::Unknown;
     if expr.is_instance(&env.ast.getattr("Name")?)? {
-        if let Ok(e) = convert_builtin(&expr, vec![], env, i.clone()) {
+        if let Ok(Some(e)) = convert_builtin(&expr, vec![], env, i.clone()) {
             Ok(e)
         } else {
             let id = Name::new(expr.getattr("id")?.extract::<String>()?);
@@ -440,7 +438,11 @@ fn convert_expr<'py, 'a>(
         };
         Ok(Expr::Slice {lo, hi, ty, i})
     } else if expr.is_instance(&env.ast.getattr("Attribute")?)? {
-        convert_builtin(&expr, vec![], env, i)
+        match convert_builtin(&expr, vec![], env, i.clone()) {
+            Ok(Some(e)) => Ok(e),
+            Ok(None) => py_runtime_error!(i, "Unknown attribute {expr}"),
+            Err(e) => Err(e)
+        }
     } else if expr.is_instance(&env.ast.getattr("Tuple")?)? {
         let elts = expr.getattr("elts")?
             .try_iter()?
@@ -453,21 +455,22 @@ fn convert_expr<'py, 'a>(
         let args = expr.getattr("args")?
             .try_iter()?
             .collect::<PyResult<Vec<Bound<'py, PyAny>>>>()?;
-        if let Ok(e) = convert_builtin(&func, args, env, i.clone()) {
-            Ok(e)
-        } else {
-            if let Ok(Expr::Var {id, ..}) = convert_expr(func, env) {
-                if env.tops.contains_key(&id.to_string()) {
-                    let args = expr.getattr("args")?
-                        .try_iter()?
-                        .map(|arg| convert_expr(arg?, env))
-                        .collect::<PyResult<Vec<Expr>>>()?;
-                    Ok(Expr::Call {id, args, ty, i})
+        match convert_builtin(&func, args, env, i.clone())? {
+            Some(e) => Ok(e),
+            None => {
+                if let Ok(Expr::Var {id, ..}) = convert_expr(func, env) {
+                    if env.tops.contains_key(&id.to_string()) {
+                        let args = expr.getattr("args")?
+                            .try_iter()?
+                            .map(|arg| convert_expr(arg?, env))
+                            .collect::<PyResult<Vec<Expr>>>()?;
+                        Ok(Expr::Call {id, args, ty, i})
+                    } else {
+                        py_runtime_error!(i, "Call to unknown function {}", id.to_string())
+                    }
                 } else {
-                    py_runtime_error!(i, "Call to unknown function {}", id.to_string())
+                    py_runtime_error!(i, "Unsupported call target type")
                 }
-            } else {
-                py_runtime_error!(i, "Unsupported call target type")
             }
         }
     } else {
@@ -498,25 +501,8 @@ fn construct_expr_stmt(
     value: Expr,
     i: &Info
 ) -> PyResult<Stmt> {
-    let extract_label = |arg| match arg {
-        Expr::String {v, ..} => Ok(v),
-        _ => {
-            let msg = concat!(
-                "First argument of parpy.label should be a string literal ",
-                "representing the label name"
-            );
-            py_runtime_error!(i, "{}", msg)
-        }
-    };
     match value {
         Expr::Label {label, ..} => {
-            Ok(Stmt::Label {label, i: i.clone()})
-        },
-        Expr::Builtin {func: Builtin::Label, mut args, ..} => {
-            let label = match args.len() {
-                1 => extract_label(args.remove(0)),
-                _ => py_runtime_error!(i, "Label statement expects one argument")
-            }?;
             Ok(Stmt::Label {label, i: i.clone()})
         },
         Expr::Call {id, args, ..} => {
@@ -639,13 +625,12 @@ fn convert_stmt<'py, 'a>(
                 if !fst.getattr("optional_vars")?.is_none() {
                     py_runtime_error!(i, "With statements using the 'as' keyword are not supported")?
                 }
-                match convert_builtin(&fst.getattr("context_expr")?, vec![], env, i.clone()) {
-                    Ok(Expr::GpuContext {..}) => {
+                match convert_builtin(&fst.getattr("context_expr")?, vec![], env, i.clone())? {
+                    Some(Expr::GpuContext {..}) => {
                         let body = convert_stmts(stmt.getattr("body")?, env)?;
                         Ok(Stmt::WithGpuContext {body, i})
                     },
-                    r => {
-                        println!("{r:#?}");
+                    _ => {
                         py_runtime_error!(i, "With statements are only supported for 'parpy.gpu'")
                     }
                 }
@@ -877,21 +862,29 @@ mod test {
         let ast = parse_str_expr(py, s)?;
         let tops = BTreeMap::new();
         let env = make_env(py, &tops, globals)?;
-        lookup_builtin_expr(&ast, &env, &Info::default())
+        let (func, args) = if ast.hasattr("func")? {
+            let func = ast.getattr("func")?;
+            let args = ast.getattr("args")?
+                .try_iter()?
+                .collect::<PyResult<Vec<Bound<'py, PyAny>>>>()?;
+            (func, args)
+        } else {
+            (ast, vec![])
+        };
+        match convert_builtin(&func, args, &env, i())? {
+            Some(e) => Ok(e),
+            None => py_runtime_error!(i(), "Failed to find built-in")
+        }
     }
 
     fn lookup_builtin_ok(
         s: &str,
-        expected_func: Builtin
+        expected: Expr
     ) -> PyResult<()> {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             let e = lookup_builtin(py, s, None)?;
-            if let Expr::Builtin {func, ..} = e {
-                assert_eq!(func, expected_func);
-            } else {
-                assert!(false)
-            }
+            assert_eq!(e, expected);
             Ok(())
         })
     }
@@ -906,107 +899,267 @@ mod test {
 
     #[test]
     fn lookup_builtin_exp() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.exp", Builtin::Exp)?;
-        lookup_builtin_fail("torch.exp")?;
-        lookup_builtin_fail("exp")
+        let expected = Expr::UnOp {
+            op: UnOp::Exp,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 20, 1, 22)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 23)
+        };
+        lookup_builtin_ok("parpy.operators.exp(1.0)", expected)?;
+        lookup_builtin_fail("torch.exp(1.0)")?;
+        lookup_builtin_fail("exp(1.0)")
     }
 
     #[test]
     fn lookup_builtin_inf() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.inf", Builtin::Inf)?;
-        lookup_builtin_ok("float('inf')", Builtin::Inf)?;
+        let expected = Expr::Float {
+            v: f64::INFINITY,
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 19)
+        };
+        lookup_builtin_ok("parpy.operators.inf", expected)?;
         lookup_builtin_fail("torch.inf")?;
         lookup_builtin_fail("inf")
     }
 
     #[test]
     fn lookup_builtin_log() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.log", Builtin::Log)?;
-        lookup_builtin_fail("torch.log")
+        let expected = Expr::UnOp {
+            op: UnOp::Log,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 20, 1, 22)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 23)
+        };
+        lookup_builtin_ok("parpy.operators.log(1.0)", expected)?;
+        lookup_builtin_fail("torch.log(1.0)")
     }
 
     #[test]
-    fn lookup_builtin_max() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.max", Builtin::Max)
+    fn lookup_builtin_maximum() -> PyResult<()> {
+        let expected = Expr::BinOp {
+            lhs: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 24, 1, 27)
+            }),
+            op: BinOp::Max,
+            rhs: Box::new(Expr::Float {
+                v: 0.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 29, 1, 32)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 33)
+        };
+        lookup_builtin_ok("parpy.operators.maximum(1.0, 0.0)", expected)
     }
 
     #[test]
-    fn lookup_builtin_min() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.min", Builtin::Min)
+    fn lookup_builtin_minimum() -> PyResult<()> {
+        let expected = Expr::BinOp {
+            lhs: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 24, 1, 27)
+            }),
+            op: BinOp::Min,
+            rhs: Box::new(Expr::Float {
+                v: 0.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 29, 1, 32)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 33)
+        };
+        lookup_builtin_ok("parpy.operators.minimum(1.0, 0.0)", expected)
     }
 
     #[test]
-    fn lookup_builtin_reduce_ops() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.sum", Builtin::Sum)?;
-        lookup_builtin_ok("parpy.operators.prod", Builtin::Prod)
+    fn lookup_builtin_max_reduce() -> PyResult<()> {
+        let expected = Expr::ReduceOp {
+            op: ReduceOp::Max,
+            arg: Box::new(Expr::Var {
+                id: id("x"),
+                ty: Type::Unknown,
+                i: mkinfo(1, 20, 1, 21)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 22)
+        };
+        lookup_builtin_ok("parpy.operators.max(x)", expected)
+    }
+
+    #[test]
+    fn lookup_builtin_min_reduce() -> PyResult<()> {
+        let expected = Expr::ReduceOp {
+            op: ReduceOp::Min,
+            arg: Box::new(Expr::Var {
+                id: id("x"),
+                ty: Type::Unknown,
+                i: mkinfo(1, 20, 1, 21)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 22)
+        };
+        lookup_builtin_ok("parpy.operators.min(x)", expected)
+    }
+
+    #[test]
+    fn lookup_builtin_sum_reduce() -> PyResult<()> {
+        let expected = Expr::ReduceOp {
+            op: ReduceOp::Sum,
+            arg: Box::new(Expr::Var {
+                id: id("x"),
+                ty: Type::Unknown,
+                i: mkinfo(1, 20, 1, 21)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 22)
+        };
+        lookup_builtin_ok("parpy.operators.sum(x)", expected)
+    }
+
+    #[test]
+    fn lookup_builtin_prod_reduce() -> PyResult<()> {
+        let expected = Expr::ReduceOp {
+            op: ReduceOp::Prod,
+            arg: Box::new(Expr::Var {
+                id: id("x"),
+                ty: Type::Unknown,
+                i: mkinfo(1, 21, 1, 22)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 23)
+        };
+        lookup_builtin_ok("parpy.operators.prod(x)", expected)
     }
 
     #[test]
     fn lookup_builtin_abs() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.abs", Builtin::Abs)
-    }
-
-    #[test]
-    fn lookup_builtin_conversion() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.int8", Builtin::Convert {sz: ElemSize::I8})?;
-        lookup_builtin_ok("parpy.operators.int16", Builtin::Convert {sz: ElemSize::I16})?;
-        lookup_builtin_ok("parpy.operators.int32", Builtin::Convert {sz: ElemSize::I32})?;
-        lookup_builtin_ok("parpy.operators.int64", Builtin::Convert {sz: ElemSize::I64})?;
-        lookup_builtin_ok("parpy.operators.uint8", Builtin::Convert {sz: ElemSize::U8})?;
-        lookup_builtin_ok("parpy.operators.uint16", Builtin::Convert {sz: ElemSize::U16})?;
-        lookup_builtin_ok("parpy.operators.uint32", Builtin::Convert {sz: ElemSize::U32})?;
-        lookup_builtin_ok("parpy.operators.uint64", Builtin::Convert {sz: ElemSize::U64})?;
-        lookup_builtin_ok("parpy.operators.float16", Builtin::Convert {sz: ElemSize::F16})?;
-        lookup_builtin_ok("parpy.operators.float32", Builtin::Convert {sz: ElemSize::F32})?;
-        lookup_builtin_ok("parpy.operators.float64", Builtin::Convert {sz: ElemSize::F64})
+        let expected = Expr::UnOp {
+            op: UnOp::Abs,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 21, 1, 23)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 24)
+        };
+        lookup_builtin_ok("parpy.operators.abs(1.0)", expected)
     }
 
     #[test]
     fn lookup_builtin_sqrt() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.sqrt", Builtin::Sqrt)?;
-        lookup_builtin_fail("torch.sqrt")
+        let expected = Expr::UnOp {
+            op: UnOp::Sqrt,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 22, 1, 24)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 25)
+        };
+        lookup_builtin_ok("parpy.operators.sqrt(1.0)", expected)?;
+        lookup_builtin_fail("torch.sqrt(1.0)")
     }
 
     #[test]
-    fn lookup_builtin_trigonometry() -> PyResult<()> {
-        lookup_builtin_ok("parpy.operators.cos", Builtin::Cos)?;
-        lookup_builtin_fail("torch.cos")?;
-        lookup_builtin_ok("parpy.operators.sin", Builtin::Sin)?;
-        lookup_builtin_fail("torch.sin")?;
-        lookup_builtin_ok("parpy.operators.tanh", Builtin::Tanh)?;
-        lookup_builtin_fail("torch.tanh")?;
-        lookup_builtin_ok("parpy.operators.atan2", Builtin::Atan2)?;
-        lookup_builtin_fail("torch.atan2")
+    fn lookup_builtin_cos() -> PyResult<()> {
+        let expected = Expr::UnOp {
+            op: UnOp::Cos,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 21, 1, 23)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 24)
+        };
+        lookup_builtin_ok("parpy.operators.cos(1.0)", expected)?;
+        lookup_builtin_fail("torch.cos(1.0)")
+    }
+
+    #[test]
+    fn lookup_builtin_sin() -> PyResult<()> {
+        let expected = Expr::UnOp {
+            op: UnOp::Sin,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 21, 1, 23)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 24)
+        };
+        lookup_builtin_ok("parpy.operators.sin(1.0)", expected)?;
+        lookup_builtin_fail("torch.sin(1.0)")
+    }
+
+    #[test]
+    fn lookup_builtin_tanh() -> PyResult<()> {
+        let expected = Expr::UnOp {
+            op: UnOp::Tanh,
+            arg: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 22, 1, 24)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 25)
+        };
+        lookup_builtin_ok("parpy.operators.tanh(1.0)", expected)?;
+        lookup_builtin_fail("torch.tanh(1.0)")
+    }
+
+    #[test]
+    fn lookup_builtin_atan2() -> PyResult<()> {
+        let expected = Expr::BinOp {
+            lhs: Box::new(Expr::Float {
+                v: 1.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 24, 1, 26)
+            }),
+            op: BinOp::Atan2,
+            rhs: Box::new(Expr::Float {
+                v: 0.0,
+                ty: Type::Unknown,
+                i: mkinfo(1, 28, 1, 30)
+            }),
+            ty: Type::Unknown,
+            i: mkinfo(1, 0, 1, 31)
+        };
+        lookup_builtin_ok("parpy.operators.atan2(1.0, 0.0)", expected)?;
+        lookup_builtin_fail("torch.atan2(1.0, 0.0)")
     }
 
     #[test]
     fn lookup_builtin_torch_prefix_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.log")
+        lookup_builtin_fail("torch.log(1.0)")
     }
 
     #[test]
     fn lookup_builtin_torch_max_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.max")
+        lookup_builtin_fail("torch.max(1.0)")
     }
 
     #[test]
     fn lookup_builtin_torch_sum_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.sum")
+        lookup_builtin_fail("torch.sum(x)")
     }
 
     #[test]
     fn lookup_builtin_torch_prod_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.prod")
-    }
-
-    #[test]
-    fn lookup_builtin_torch_any_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.any")
-    }
-
-    #[test]
-    fn lookup_builtin_torch_all_fail() -> PyResult<()> {
-        lookup_builtin_fail("torch.all")
+        lookup_builtin_fail("torch.prod(x)")
     }
 
     #[test]
@@ -1017,8 +1170,8 @@ mod test {
             let globals = vec![
                 ("pops", parpy.getattr("operators")?.downcast_into::<PyModule>()?)
             ].into_py_dict(py)?;
-            let e = lookup_builtin(py, "pops.sum", Some(globals))?;
-            assert!(matches!(e, Expr::Builtin {func: Builtin::Sum, ..}));
+            let e = lookup_builtin(py, "pops.sum(x)", Some(globals))?;
+            assert!(matches!(e, Expr::ReduceOp {op: ReduceOp::Sum, ..}));
             Ok(())
         })
     }
@@ -1428,13 +1581,8 @@ mod test {
     #[test]
     fn convert_expr_label() {
         let e = convert_expr_wrap("parpy.operators.label('a')").unwrap();
-        assert_eq!(e, Expr::Builtin {
-            func: Builtin::Label,
-            args: vec![Expr::String {
-                v: "a".to_string(),
-                ty: Type::Unknown,
-                i: mkinfo(1, 14, 1, 17)
-            }],
+        assert_eq!(e, Expr::Label {
+            label: "a".to_string(),
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 18)
         });
@@ -1443,9 +1591,9 @@ mod test {
     #[test]
     fn convert_expr_sum() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:])").unwrap();
-        assert_eq!(e, Expr::Builtin {
-            func: Builtin::Sum,
-            args: vec![Expr::Subscript {
+        assert_eq!(e, Expr::ReduceOp {
+            op: ReduceOp::Sum,
+            arg: Box::new(Expr::Subscript {
                 target: Box::new(Expr::Var {
                     id: id("x"),
                     ty: Type::Unknown,
@@ -1456,7 +1604,7 @@ mod test {
                 }),
                 ty: Type::Unknown,
                 i: mkinfo(1, 12, 1, 17)
-            }],
+            }),
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 17)
         });
@@ -1538,13 +1686,13 @@ mod test {
     #[test]
     fn convert_stmt_label_invalid_arg() {
         let e = convert_stmt_wrap("parpy.label(4)");
-        assert_py_error_matches(e, r"First argument.*should be a string literal");
+        assert_py_error_matches(e, r"Label builtin expects a string argument");
     }
 
     #[test]
     fn convert_stmt_label_multi_args() {
         let e = convert_stmt_wrap("parpy.label('a', 'b')");
-        assert_py_error_matches(e, r"Label statement expects one argument");
+        assert_py_error_matches(e, r"Label builtin expects one argument but found 2");
     }
 
     #[test]

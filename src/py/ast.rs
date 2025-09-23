@@ -136,13 +136,6 @@ impl SFold<Type> for Type {
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Builtin {
-    #[default] Exp, Inf, Log, Max, Min, Abs, Cos, Sin, Sqrt, Tanh, Atan2,
-    Sum, Prod,
-    Convert {sz: ElemSize}, Label, GpuContext
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ReduceOp {
     #[default] Max, Min, Sum, Prod
 }
@@ -173,8 +166,7 @@ pub enum Expr {
     Slice {lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, ty: Type, i: Info},
     Tuple {elems: Vec<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
-    Builtin {func: Builtin, args: Vec<Expr>, ty: Type, i: Info},
-    Convert {e: Box<Expr>, ty: Type},
+    Convert {e: Box<Expr>, ty: Type, i: Info},
     GpuContext {ty: Type, i: Info},
     Label {label: String, ty: Type, i: Info},
 }
@@ -195,7 +187,6 @@ impl Expr {
             Expr::Slice {..} => 10,
             Expr::Tuple {..} => 11,
             Expr::Call {..} => 12,
-            Expr::Builtin {..} => 20,
             Expr::Convert {..} => 13,
             Expr::GpuContext {..} => 14,
             Expr::Label {..} => 15,
@@ -217,8 +208,7 @@ impl Expr {
             Expr::Slice {lo, hi, ty, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, ty, ..} => Expr::Tuple {elems, ty, i},
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
-            Expr::Builtin {func, args, ty, ..} => Expr::Builtin {func, args, ty, i},
-            Expr::Convert {e, ty} => Expr::Convert {e: Box::new(e.with_info(i)), ty},
+            Expr::Convert {e, ty, ..} => Expr::Convert {e, ty, i},
             Expr::GpuContext {ty, ..} => Expr::GpuContext {ty, i},
             Expr::Label {label, ty, ..} => Expr::Label {label, ty, i},
         }
@@ -241,7 +231,6 @@ impl ExprType<Type> for Expr {
             Expr::Slice {ty, ..} => ty,
             Expr::Tuple {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
-            Expr::Builtin {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
             Expr::GpuContext {ty, ..} => ty,
             Expr::Label {ty, ..} => ty,
@@ -254,8 +243,8 @@ impl ExprType<Type> for Expr {
             Expr::Int {..} | Expr::Float {..} => true,
             Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
             Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-            Expr::Tuple {..} | Expr::Call {..} | Expr::Builtin {..} |
-            Expr::Convert {..} | Expr::GpuContext {..} | Expr::Label {..} => false,
+            Expr::Tuple {..} | Expr::Call {..} | Expr::Convert {..} |
+            Expr::GpuContext {..} | Expr::Label {..} => false,
         }
     }
 }
@@ -288,10 +277,7 @@ impl Ord for Expr {
                 lelems.cmp(relems),
             (Expr::Call {id: lid, args: largs, ..}, Expr::Call {id: rid, args: rargs, ..}) =>
                 lid.cmp(rid).then(largs.cmp(rargs)),
-            ( Expr::Builtin {func: lfunc, args: largs, ..}
-            , Expr::Builtin {func: rfunc, args: rargs, ..} ) =>
-                lfunc.cmp(rfunc).then(largs.cmp(rargs)),
-            (Expr::Convert {e: le, ty: lty}, Expr::Convert {e: re, ty: rty}) =>
+            (Expr::Convert {e: le, ty: lty, ..}, Expr::Convert {e: re, ty: rty, ..}) =>
                 le.cmp(re).then(lty.cmp(rty)),
             (lhs, rhs) => lhs.discriminator().cmp(&rhs.discriminator())
         }
@@ -328,8 +314,7 @@ impl InfoNode for Expr {
             Expr::Slice {i, ..} => i.clone(),
             Expr::Tuple {i, ..} => i.clone(),
             Expr::Call {i, ..} => i.clone(),
-            Expr::Builtin {i, ..} => i.clone(),
-            Expr::Convert {e, ..} => e.get_info(),
+            Expr::Convert {i, ..} => i.clone(),
             Expr::GpuContext {i, ..} => i.clone(),
             Expr::Label {i, ..} => i.clone(),
         }
@@ -392,13 +377,9 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, ty, i}))
             },
-            Expr::Builtin {func, args, ty, i} => {
-                let (acc, args) = args.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Expr::Builtin {func, args, ty, i}))
-            },
-            Expr::Convert {e, ty} => {
+            Expr::Convert {e, ty, i} => {
                 let (acc, e) = f(acc?, *e)?;
-                Ok((acc, Expr::Convert {e: Box::new(e), ty}))
+                Ok((acc, Expr::Convert {e: Box::new(e), ty, i}))
             },
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |
@@ -424,7 +405,6 @@ impl SFold<Expr> for Expr {
             Expr::Slice {lo, hi, ..} => hi.sfold_result(lo.sfold_result(acc, &f), &f),
             Expr::Tuple {elems, ..} => elems.sfold_result(acc, &f),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
-            Expr::Builtin {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |

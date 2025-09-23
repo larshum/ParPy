@@ -96,72 +96,6 @@ fn to_ir_type(
     }
 }
 
-fn to_float_literal_value(func: py_ast::Builtin, i: &Info) -> CompileResult<f64> {
-    match func {
-        py_ast::Builtin::Inf => Ok(f64::INFINITY),
-        _ => parpy_compile_error!(i, "Invalid builtin literal value: {func}")
-    }
-}
-
-fn to_unary_op(func: py_ast::Builtin, i: &Info) -> CompileResult<UnOp> {
-    match func {
-        py_ast::Builtin::Exp => Ok(UnOp::Exp),
-        py_ast::Builtin::Log => Ok(UnOp::Log),
-        py_ast::Builtin::Cos => Ok(UnOp::Cos),
-        py_ast::Builtin::Sin => Ok(UnOp::Sin),
-        py_ast::Builtin::Sqrt => Ok(UnOp::Sqrt),
-        py_ast::Builtin::Tanh => Ok(UnOp::Tanh),
-        py_ast::Builtin::Abs => Ok(UnOp::Abs),
-        py_ast::Builtin::Inf | py_ast::Builtin::Max | py_ast::Builtin::Min |
-        py_ast::Builtin::Atan2 | py_ast::Builtin::Sum | py_ast::Builtin::Prod |
-        py_ast::Builtin::Convert {..} | py_ast::Builtin::Label |
-        py_ast::Builtin::GpuContext => {
-            parpy_compile_error!(i, "Invalid builtin unary operator: {func}")
-        }
-    }
-}
-
-fn to_binary_op(func: py_ast::Builtin, i: &Info) -> CompileResult<BinOp> {
-    match func {
-        py_ast::Builtin::Max => Ok(BinOp::Max),
-        py_ast::Builtin::Min => Ok(BinOp::Min),
-        py_ast::Builtin::Atan2 => Ok(BinOp::Atan2),
-        py_ast::Builtin::Exp | py_ast::Builtin::Inf | py_ast::Builtin::Log |
-        py_ast::Builtin::Cos | py_ast::Builtin::Sin | py_ast::Builtin::Sqrt |
-        py_ast::Builtin::Tanh | py_ast::Builtin::Abs | py_ast::Builtin::Sum |
-        py_ast::Builtin::Prod | py_ast::Builtin::Convert {..} |
-        py_ast::Builtin::Label | py_ast::Builtin::GpuContext => {
-            parpy_compile_error!(i, "Invalid builtin binary operator: {func}")
-        }
-    }
-}
-
-fn to_builtin(
-    func: py_ast::Builtin,
-    mut args: Vec<Expr>,
-    ty: Type,
-    i: Info
-) -> CompileResult<Expr> {
-    match args.len() {
-        0 => {
-            let v = to_float_literal_value(func, &i)?;
-            Ok(Expr::Float {v, ty, i})
-        },
-        1 => {
-            let op = to_unary_op(func, &i)?;
-            let arg = Box::new(args.remove(0));
-            Ok(Expr::UnOp {op, arg, ty, i})
-        },
-        2 => {
-            let op = to_binary_op(func, &i)?;
-            let lhs = Box::new(args.remove(0));
-            let rhs = Box::new(args.remove(0));
-            Ok(Expr::BinOp {lhs, op, rhs, ty, i})
-        },
-        n => parpy_compile_error!(i, "Builtin {func} does not expect {n} arguments")
-    }
-}
-
 fn unwrap_tensor_indices(
     env: &IREnv,
     target: py_ast::Expr,
@@ -343,18 +277,10 @@ fn to_ir_expr(
                 .unwrap_or(LoopPar::default());
             Ok(Expr::Call {id, args, par, ty, i})
         },
-        py_ast::Expr::Builtin {func, args, ty, i, ..} => {
-            let args = args.into_iter()
-                .map(|e| to_ir_expr(env, e))
-                .collect::<CompileResult<Vec<Expr>>>()?;
-            let ty = to_ir_type(env, &i, ty)?;
-            to_builtin(func, args, ty, i)
-        },
-        py_ast::Expr::Convert {e, ty} => {
-            let i = e.get_info();
+        py_ast::Expr::Convert {e, ty, i} => {
             let e = Box::new(to_ir_expr(env, *e)?);
             let ty = to_ir_type(env, &i, ty)?;
-            Ok(Expr::Convert {e, ty})
+            Ok(Expr::Convert {e, ty, i})
         },
         py_ast::Expr::GpuContext {i, ..} => {
             parpy_internal_error!(i, "Found intermediate GpuContext expression in IR translation")
@@ -611,61 +537,6 @@ mod test {
     fn unknown_type() {
         let r = conv_ir_type(py_ast::Type::Unknown);
         assert_error_matches(r, r"unknown type when translating to IR");
-    }
-
-    #[test]
-    fn inf_float_literal_builtin() {
-        let r = to_float_literal_value(py_ast::Builtin::Inf, &i());
-        assert_eq!(r.unwrap(), f64::INFINITY);
-    }
-
-    #[test]
-    fn non_float_literal_builtin() {
-        let r = to_float_literal_value(py_ast::Builtin::Max, &i());
-        assert_error_matches(r, r"Invalid builtin literal value");
-    }
-
-    #[test]
-    fn invalid_unop_builtin_max() {
-        let r = to_unary_op(py_ast::Builtin::Max, &i());
-        assert_error_matches(r, r"Invalid builtin unary");
-    }
-
-    #[test]
-    fn invalid_binop_builtin_exp() {
-        let r = to_binary_op(py_ast::Builtin::Exp, &i());
-        assert_error_matches(r, r"Invalid builtin binary");
-    }
-
-    #[test]
-    fn to_float_inf_expr() {
-        let r = to_builtin(py_ast::Builtin::Inf, vec![], scalar(ElemSize::F32), i());
-        assert_eq!(r.unwrap(), float(f64::INFINITY, None));
-    }
-
-    #[test]
-    fn builtin_to_unop_expr() {
-        let r = to_builtin(
-            py_ast::Builtin::Log, vec![float(1.5, None)], scalar(ElemSize::F32), i()
-        );
-        assert_eq!(r.unwrap(), unop(UnOp::Log, float(1.5, None)));
-    }
-
-    #[test]
-    fn builtin_to_binop_expr() {
-        let ty = scalar(ElemSize::F32);
-        let r = to_builtin(
-            py_ast::Builtin::Min, vec![float(1.0, None), float(2.0, None)], ty.clone(), i()
-        );
-        let expected = binop(float(1.0, None), BinOp::Min, float(2.0, None), Some(ty));
-        assert_eq!(r.unwrap(), expected);
-    }
-
-    #[test]
-    fn builtin_too_many_args() {
-        let args = vec![float(1.0, None), float(2.0, None), float(3.0, None)];
-        let r = to_builtin(py_ast::Builtin::Sum, args, scalar(ElemSize::F32), i());
-        assert_error_matches(r, r"does not expect 3 arguments");
     }
 
     #[test]

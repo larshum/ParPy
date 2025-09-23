@@ -80,14 +80,14 @@ fn fold_expr(e: Expr) -> Expr {
             let rhs = fold_expr(*rhs);
             constant_fold_binop(lhs, op, rhs, ty, i)
         },
-        Expr::Convert {e, ty} => {
+        Expr::Convert {e, ty, i} => {
             let e = fold_expr(*e);
             match e {
-                Expr::Float {v, i, ..} if v.is_infinite() => {
+                Expr::Float {v, ..} if v.is_infinite() => {
                     Expr::Float {v, ty, i}
                 },
                 _ => {
-                    Expr::Convert {e: Box::new(e), ty}
+                    Expr::Convert {e: Box::new(e), ty, i}
                 }
             }
         },
@@ -106,6 +106,7 @@ pub fn fold(body: Vec<Stmt>) -> Vec<Stmt> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::test::*;
     use crate::py::ast_builder::*;
 
     fn bool_lit(v: bool) -> Expr {
@@ -295,11 +296,13 @@ mod test {
     fn test_fold_in_convert() {
         let e = Expr::Convert {
             e: Box::new(binop(int_lit(1), BinOp::Add, int_lit(2), scalar(ElemSize::I64))),
-            ty: scalar(ElemSize::I16)
+            ty: scalar(ElemSize::I16),
+            i: i()
         };
         let expected = Expr::Convert {
             e: Box::new(int_lit(3)),
-            ty: scalar(ElemSize::I16)
+            ty: scalar(ElemSize::I16),
+            i: i()
         };
         assert_eq!(fold_expr(e), expected);
     }
@@ -308,7 +311,8 @@ mod test {
     fn test_fold_convert_inf_float() {
         let e = Expr::Convert {
             e: Box::new(float_lit(f64::INFINITY)),
-            ty: scalar(ElemSize::F16)
+            ty: scalar(ElemSize::F16),
+            i: i()
         };
         assert_eq!(fold_expr(e), float(f64::INFINITY, Some(ElemSize::F16)));
     }

@@ -80,14 +80,14 @@ pub fn fold_expr(e: Expr) -> Expr {
             let rhs = fold_expr(*rhs);
             constant_fold_binop(lhs, op, rhs, ty, i)
         },
-        Expr::Convert {e, ty} => {
+        Expr::Convert {e, ty, i} => {
             let e = fold_expr(*e);
             match e {
-                Expr::Float {v, i, ..} if v.is_infinite() => {
+                Expr::Float {v, ..} if v.is_infinite() => {
                     Expr::Float {v, ty, i}
                 },
                 _ => {
-                    Expr::Convert {e: Box::new(e), ty}
+                    Expr::Convert {e: Box::new(e), ty, i}
                 }
             }
         },
@@ -122,6 +122,7 @@ pub fn fold(ast: Ast) -> Ast {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::test::*;
     use crate::ir::ast_builder::*;
 
     fn cf(e: &Expr) -> Expr {
@@ -195,7 +196,8 @@ mod test {
     fn convert_float32_inf() {
         let e = Expr::Convert {
             e: Box::new(float(f64::INFINITY, Some(ElemSize::F32))),
-            ty: scalar(ElemSize::F32)
+            ty: scalar(ElemSize::F32),
+            i: i()
         };
         assert_eq!(cf(&e), float(f64::INFINITY, Some(ElemSize::F32)));
     }
@@ -204,7 +206,8 @@ mod test {
     fn convert_float32_neginf() {
         let e = Expr::Convert {
             e: Box::new(float(-f64::INFINITY, Some(ElemSize::F32))),
-            ty: scalar(ElemSize::F32)
+            ty: scalar(ElemSize::F32),
+            i: i()
         };
         assert_eq!(cf(&e), float(-f64::INFINITY, Some(ElemSize::F32)));
     }

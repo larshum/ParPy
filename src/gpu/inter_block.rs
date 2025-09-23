@@ -203,12 +203,14 @@ fn inner_multi_block_reduce_loop(
                 rhs: Box::new(block_ofs),
                 ty: int_ty.clone(), i: i.clone()
             }),
-            ty: int_ty.clone()
+            ty: int_ty.clone(),
+            i: i.clone()
         }),
         op: BinOp::Min,
         rhs: Box::new(Expr::Convert {
             e: Box::new(hi),
-            ty: int_ty.clone()
+            ty: int_ty.clone(),
+            i: i.clone()
         }),
         ty: int_ty.clone(), i: i.clone()
     };
@@ -1202,7 +1204,11 @@ mod test {
 
     #[test]
     fn unwrap_convert_expr() {
-        let e = Expr::Convert {e: Box::new(int(1, None)), ty: scalar(ElemSize::U16)};
+        let e = Expr::Convert {
+            e: Box::new(int(1, None)),
+            ty: scalar(ElemSize::U16),
+            i: i()
+        };
         assert_eq!(unwrap_convert(&e), int(1, None));
     }
 

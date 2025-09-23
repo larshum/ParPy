@@ -7,7 +7,6 @@ mod inline_const;
 mod labels;
 mod par;
 mod pprint;
-mod replace_builtins;
 mod shape_symbol_labels;
 mod slice_transformation;
 mod specialize;
@@ -39,7 +38,6 @@ pub fn parse_untyped_ast<'py>(
 ) -> PyResult<ast::FunDef> {
     let ast = from_py::to_untyped_ir(ast, info, tops, vars.clone())?;
     let ast = symbolize::with_tops(tops, &vars, ast)?;
-    let ast = replace_builtins::apply(ast)?;
     labels::associate_labels(ast)
 }
 

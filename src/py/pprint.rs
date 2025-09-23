@@ -4,30 +4,6 @@ use crate::utils::pprint::*;
 
 use std::fmt;
 
-impl PrettyPrint for Builtin {
-    fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        let s = match self {
-            Builtin::Exp => "exp",
-            Builtin::Inf => "inf",
-            Builtin::Log => "log",
-            Builtin::Max => "max",
-            Builtin::Min => "min",
-            Builtin::Abs => "abs",
-            Builtin::Cos => "cos",
-            Builtin::Sin => "sin",
-            Builtin::Sqrt => "sqrt",
-            Builtin::Tanh => "tanh",
-            Builtin::Atan2 => "atan2",
-            Builtin::Sum => "sum",
-            Builtin::Prod => "prod",
-            Builtin::Convert {..} => "<convert>",
-            Builtin::Label => "<label>",
-            Builtin::GpuContext => "<gpu_context>",
-        };
-        (env, s.to_string())
-    }
-}
-
 fn print_scalar(sz: &ElemSize) -> String {
     format!("parpy.types.{sz:?}")
 }
@@ -239,12 +215,7 @@ impl PrettyPrint for Expr {
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
             },
-            Expr::Builtin {func, args, ..} => {
-                let (env, func) = func.pprint(env);
-                let (env, args) = pprint_iter(args.iter(), env, ", ");
-                (env, format!("{func}({args})"))
-            },
-            Expr::Convert {e, ty} => {
+            Expr::Convert {e, ty, ..} => {
                 let (env, e) = e.pprint(env);
                 let (env, ty) = ty.pprint(env);
                 (env, format!("{ty}({e})"))
@@ -380,12 +351,6 @@ impl fmt::Display for TensorShape {
 }
 
 impl fmt::Display for TensorElemSize {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.pprint_default())
-    }
-}
-
-impl fmt::Display for Builtin {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.pprint_default())
     }
@@ -644,7 +609,9 @@ mod test {
             var("x", scalar(ElemSize::F32)),
             BinOp::Add,
             Expr::Convert {
-                e: Box::new(var("y", scalar(ElemSize::I32))), ty: scalar(ElemSize::F32)
+                e: Box::new(var("y", scalar(ElemSize::I32))),
+                ty: scalar(ElemSize::F32),
+                i: i()
             },
             scalar(ElemSize::F32)
         );

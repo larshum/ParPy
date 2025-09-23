@@ -101,7 +101,7 @@ pub fn call(id: Name, args: Vec<Expr>, ty: Type) -> Expr {
 }
 
 pub fn convert(e: Expr, ty: Type) -> Expr {
-    Expr::Convert {e: Box::new(e), ty}
+    Expr::Convert {e: Box::new(e), ty, i: Info::default()}
 }
 
 pub fn assignment(lhs: Expr, rhs: Expr) -> Stmt {

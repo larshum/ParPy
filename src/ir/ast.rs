@@ -29,7 +29,7 @@ pub enum Expr {
     StructFieldAccess {target: Box<Expr>, label: String, ty: Type, i: Info},
     TensorAccess {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, par: LoopPar, ty: Type, i: Info},
-    Convert {e: Box<Expr>, ty: Type},
+    Convert {e: Box<Expr>, ty: Type, i: Info},
 }
 
 impl Expr {
@@ -139,9 +139,9 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, par, ty, i}))
             },
-            Expr::Convert {e, ty} => {
+            Expr::Convert {e, ty, i} => {
                 let (acc, e) = f(acc?, *e)?;
-                Ok((acc, Expr::Convert {e: Box::new(e), ty}))
+                Ok((acc, Expr::Convert {e: Box::new(e), ty, i}))
             },
         }
     }

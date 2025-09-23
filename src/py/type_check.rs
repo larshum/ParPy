@@ -507,7 +507,7 @@ fn coerce_type(e: Expr, expected_ty: &Type) -> PyResult<Expr> {
                         match unify_tensor_elem_size(unify_env, lsz.clone(), rsz.clone(), &i) {
                             Ok(_) => {
                                 let ty = Type::Tensor {sz: rsz.clone(), shape: vec![]};
-                                Ok(Expr::Convert {e: Box::new(e), ty})
+                                Ok(Expr::Convert {e: Box::new(e), ty, i})
                             },
                             Err(_) => py_type_error!(i, "Cannot coerce element size {lsz} to {rsz}.")
                         }
@@ -866,12 +866,9 @@ impl TypeCheck for Expr {
                     ty => Ok((env, Expr::Call {id: new_id, args, ty, i}))
                 }
             },
-            Expr::Builtin {i, ..} => {
-                py_internal_error!(i, "Found builtin expression in type-checker.")
-            },
-            Expr::Convert {e, ty} => {
+            Expr::Convert {e, ty, i} => {
                 let (env, e) = e.type_check(env)?;
-                Ok((env, Expr::Convert {e: Box::new(e), ty}))
+                Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
             Expr::GpuContext {..} | Expr::Label {..} => Ok((env, self))
         }
