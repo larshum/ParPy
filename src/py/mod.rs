@@ -7,7 +7,6 @@ mod inline_const;
 mod labels;
 mod par;
 mod pprint;
-mod replace_builtins;
 mod shape_symbol_labels;
 mod slice_transformation;
 mod specialize;
@@ -39,7 +38,6 @@ pub fn parse_untyped_ast<'py>(
 ) -> PyResult<ast::FunDef> {
     let ast = from_py::to_untyped_ir(ast, info, tops, vars.clone())?;
     let ast = symbolize::with_tops(tops, &vars, ast)?;
-    let ast = replace_builtins::apply(ast)?;
     labels::associate_labels(ast)
 }
 
@@ -76,7 +74,7 @@ pub fn specialize_ast_on_arguments<'py>(
     // top-level definitions. Before printing the AST, we eliminate unnecessary duplicates of the
     // same function, as the type-checker may produce such instances.
     let scalar_sizes = ScalarSizes::from_opts(&opts);
-    let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
+    let ast = type_check::apply(main, &args, tops, &opts)?;
     let ast = eliminate_duplicate_functions::apply(ast)?;
     debug_env.print("Python-like AST after type-checking", &ast);
 

@@ -68,11 +68,11 @@ def parpy_aug_ops(dst, a, b):
 
 def parpy_max(dst, a, b):
     with parpy.gpu:
-        dst[0] = parpy.operators.max(a[0], b[0])
+        dst[0] = parpy.operators.maximum(a[0], b[0])
 
 def parpy_min(dst, a, b):
     with parpy.gpu:
-        dst[0] = parpy.operators.min(a[0], b[0])
+        dst[0] = parpy.operators.minimum(a[0], b[0])
 
 def arith_binop_dtype(fn, ldtype, rdtype, compile_only, backend):
     a = np.random.randint(1, 10, (1,)).astype(ldtype)

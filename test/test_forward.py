@@ -1,7 +1,7 @@
 import importlib
 import numpy as np
 import parpy
-from parpy.operators import int16, exp, float32, inf, log, max, sum
+from parpy.operators import convert, exp, inf, log, max, maximum, sum
 import pytest
 import torch
 
@@ -104,10 +104,10 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
                     # Transitively inlined version of forward_prob_predecessors.
                     num_kmers = hmm["num_states"] // 16
 
-                    pred1 = int16((state // 4) % (hmm["num_states"] // 64))
-                    pred2 = int16(hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
-                    pred3 = int16(2 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
-                    pred4 = int16(3 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
+                    pred1 = convert((state // 4) % (hmm["num_states"] // 64), parpy.types.I16)
+                    pred2 = convert(hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), parpy.types.I16)
+                    pred3 = convert(2 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), parpy.types.I16)
+                    pred4 = convert(3 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), parpy.types.I16)
                     t11 = hmm["trans1"][pred1 % num_kmers, state % 4]
                     t12 = hmm["trans1"][pred2 % num_kmers, state % 4]
                     t13 = hmm["trans1"][pred3 % num_kmers, state % 4]
@@ -118,8 +118,8 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
                     p3 = t13 + t2 + alpha_src[inst, pred3]
                     p4 = t14 + t2 + alpha_src[inst, pred4]
 
-                    pred5 = int16(0)
-                    p5 = float32(0.0)
+                    pred5 = convert(0, parpy.types.I16)
+                    p5 = convert(0.0, parpy.types.F32)
                     if state // num_kmers == 15:
                         pred5 = state
                         p5 = hmm["gamma"]
@@ -128,19 +128,19 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
                         p5 = hmm["synthetic_248"]
                     else:
                         pred5 = ((state // num_kmers) + 1) * num_kmers + state % num_kmers
-                        p5 = float32(0.0)
+                        p5 = convert(0.0, parpy.types.F32)
                     p5 = p5 + alpha_src[inst, pred5]
 
                     # Inlined version of log_sum_exp.
-                    maxp = max(p1, p2)
-                    maxp = max(maxp, p3)
-                    maxp = max(maxp, p4)
-                    maxp = max(maxp, p5)
+                    maxp = maximum(p1, p2)
+                    maxp = maximum(maxp, p3)
+                    maxp = maximum(maxp, p4)
+                    maxp = maximum(maxp, p5)
                     lsexp = maxp + log(
                         exp(p1 - maxp) + exp(p2 - maxp) + exp(p3 - maxp) +
                         exp(p4 - maxp) + exp(p5 - maxp)
                     )
-                    lsexp = max(lsexp, float32(-inf))
+                    lsexp = maximum(lsexp, convert(-inf, parpy.types.F32))
 
                     alpha_dst[inst, state] = lsexp + hmm["output_prob"][o, state % num_kmers]
                 elif t == seqs["lens"][inst]:

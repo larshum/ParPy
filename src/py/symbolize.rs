@@ -115,15 +115,17 @@ impl Symbolize for Expr {
                 let (env, args) = args.symbolize(env)?;
                 Ok((env, Expr::Call {id, args, ty, i}))
             },
-            Expr::Convert {e, ty} => {
+            Expr::Convert {e, ty, i} => {
                 let (env, e) = e.symbolize(env)?;
                 let (env, ty) = ty.symbolize(env)?;
-                Ok((env, Expr::Convert {e: Box::new(e), ty}))
+                Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
             Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
             Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
-            Expr::Slice {..} | Expr::Tuple {..} | Expr::Builtin {..} => {
+            Expr::Slice {..} | Expr::Tuple {..} | Expr::GpuContext {..} |
+            Expr::Label {..} | Expr::StaticBackendEq {..} |
+            Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }
@@ -168,7 +170,8 @@ impl Symbolize for Stmt {
                 Ok((env, Stmt::Call {func, args, i}))
             },
             Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-            Stmt::WithGpuContext {..} | Stmt::Label {..} => {
+            Stmt::WithGpuContext {..} | Stmt::Label {..} |
+            Stmt::StaticFail {..} => {
                 let (env, s) = self.smap_accum_l_result(Ok(env), |env, e: Expr| e.symbolize(env))?;
                 s.smap_accum_l_result(Ok(env), |env, s: Stmt| s.symbolize(env))
             }

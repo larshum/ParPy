@@ -6,9 +6,9 @@ use pyo3::prelude::*;
 use pyo3::exceptions::PyRuntimeError;
 
 #[pyclass(eq, eq_int, hash, frozen)]
-#[derive(Clone, Debug, PartialEq, Hash)]
+#[derive(Clone, Debug, Default, PartialOrd, Ord, PartialEq, Eq, Hash)]
 pub enum CompileBackend {
-    Auto, Cuda, Metal
+    #[default] Auto, Cuda, Metal
 }
 
 #[pyclass]

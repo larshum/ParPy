@@ -6,70 +6,35 @@ import contextlib
 
 gpu = contextlib.nullcontext()
 
-def min(x, y=None, axis=None):
-    if y is None:
-        if axis is None:
-            return np.min(x)
-        else:
-            return np.min(x, axis=axis)
-    else:
-        assert axis is None
-        return np.minimum(x, y)
+def max(x):
+    return np.max(x)
 
-def max(x, y=None, axis=None):
-    if y is None:
-        if axis is None:
-            return np.max(x)
-        else:
-            return np.max(x, axis=axis)
-    else:
-        assert axis is None
-        return np.maximum(x, y)
+def min(x):
+    return np.min(x)
 
-def sum(x, axis=None):
-    if axis is None:
-        return np.sum(x)
-    else:
-        return np.sum(x, axis=axis)
+def maximum(x, y):
+    return np.maximum(x, y)
 
-def prod(x, axis=None):
-    if axis is None:
-        return np.prod(x)
-    else:
-        return np.prod(x, axis=axis)
+def minimum(x, y):
+    return np.minimum(x, y)
 
-def float16(x):
-    return float(x)
+def sum(x):
+    return np.sum(x)
 
-def float32(x):
-    return float(x)
+def prod(x):
+    return np.prod(x)
 
-def float64(x):
-    return float(x)
-
-def int8(x):
-    return int(x)
-
-def int16(x):
-    return int(x)
-
-def int32(x):
-    return int(x)
-
-def int64(x):
-    return int(x)
-
-def uint8(x):
-    return int(x)
-
-def uint16(x):
-    return int(x)
-
-def uint32(x):
-    return int(x)
-
-def uint64(x):
-    return int(x)
+def convert(e, ty):
+    return e
 
 def label(x):
     assert x is not None, "parpy.label expects one argument"
+
+def static_backend_eq(x):
+    return False
+
+def static_types_eq(l, r):
+    return l == r
+
+def static_fail(s):
+    raise RuntimeError(s)

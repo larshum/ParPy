@@ -47,7 +47,7 @@ def test_normalize_multirow(backend):
 def normalize_rows_no_annot(t, nrows, ncols):
     parpy.label('i')
     for i in range(nrows):
-        s = parpy.operators.float32(0.0)
+        s = parpy.operators.convert(0.0, parpy.types.F32)
         parpy.label('j1')
         for j in range(ncols):
             s = s + t[i, j]
