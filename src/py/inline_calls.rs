@@ -42,7 +42,9 @@ fn substitute_variables_expr(e: Expr, sub_map: &BTreeMap<Name, Expr>) -> Expr {
         Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
         Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
         Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
-        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Label {..} => {
+        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Label {..} |
+        Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
+        Expr::StaticFail {..} => {
             e.smap(|e| substitute_variables_expr(e, sub_map))
         }
     }
@@ -94,7 +96,7 @@ fn inline_function_calls_stmt<'py>(
             acc.push(Stmt::WithGpuContext {body, i});
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::Label {..} => {
+        Stmt::Label {..} | Stmt::StaticFail {..} => {
             acc.push(stmt);
         }
     };

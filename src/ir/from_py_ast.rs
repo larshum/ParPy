@@ -52,8 +52,8 @@ fn to_ir_elem_size(
 ) -> CompileResult<ElemSize> {
     match sz {
         py_ast::TensorElemSize::Fixed {sz} => Ok(sz),
-        py_ast::TensorElemSize::Variable {id} => {
-            parpy_compile_error!(i, "Encountered unresolved type variable {id} \
+        py_ast::TensorElemSize::Variable {..} => {
+            parpy_compile_error!(i, "Encountered unresolved type variable \
                                      when translating to IR AST")
         }
     }
@@ -283,11 +283,20 @@ fn to_ir_expr(
             Ok(Expr::Convert {e, ty, i})
         },
         py_ast::Expr::GpuContext {i, ..} => {
-            parpy_internal_error!(i, "Found intermediate GpuContext expression in IR translation")
+            parpy_internal_error!(i, "Found GpuContext expression node in IR translation")
         },
         py_ast::Expr::Label {i, ..} => {
-            parpy_internal_error!(i, "Found intermediate Label expression in IR translation")
+            parpy_internal_error!(i, "Found Label expression node in IR translation")
         },
+        py_ast::Expr::StaticBackendEq {i, ..} => {
+            parpy_internal_error!(i, "Found StaticBackendEq expression node in IR translation")
+        },
+        py_ast::Expr::StaticTypesEq {i, ..} => {
+            parpy_internal_error!(i, "Found StaticTypesEq expression node in IR translation")
+        },
+        py_ast::Expr::StaticFail {i, ..} => {
+            parpy_internal_error!(i, "Found StaticFail expression node in IR translation")
+        }
     }
 }
 
@@ -362,11 +371,14 @@ fn to_ir_stmt(
             let par = LoopPar::default().threads(1).unwrap();
             Ok(Stmt::For {var, lo, hi, step: 1, body, par, i})
         },
-        py_ast::Stmt::Call {func, i, ..} => {
-            parpy_compile_error!(i, "Found unsupported function call to {func}")
+        py_ast::Stmt::Call {i, ..} => {
+            parpy_internal_error!(i, "Found Call statement node in IR translation")
         },
         py_ast::Stmt::Label {i, ..} => {
-            parpy_compile_error!(i, "Found label without associated statement")
+            parpy_internal_error!(i, "Found Label statement node in IR translation")
+        },
+        py_ast::Stmt::StaticFail {i, ..} => {
+            parpy_internal_error!(i, "Found StaticFail statement node in IR translation")
         }
     }
 }

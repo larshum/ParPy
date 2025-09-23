@@ -222,6 +222,17 @@ impl PrettyPrint for Expr {
             },
             Expr::GpuContext {..} => (env, format!("<gpu_context>")),
             Expr::Label {label, ..} => (env, format!("<label({label})>")),
+            Expr::StaticBackendEq {backend, ..} => {
+                (env, format!("<static_backend_eq({backend:?})>"))
+            },
+            Expr::StaticTypesEq {lhs, rhs, ..} => {
+                let (env, lhs) = lhs.pprint(env);
+                let (env, rhs) = rhs.pprint(env);
+                (env, format!("<static_types_eq({lhs}, {rhs})>"))
+            },
+            Expr::StaticFail {msg, ..} => {
+                (env, format!("<static_fail({msg})>"))
+            },
         }
     }
 
@@ -286,7 +297,10 @@ impl PrettyPrint for Stmt {
             },
             Stmt::Label {label, ..} => {
                 (env, format!("{indent}parpy.label(\"{label}\")"))
-            }
+            },
+            Stmt::StaticFail {msg, ..} => {
+                (env, format!("{indent}parpy.static_fail(\"{msg}\")"))
+            },
         }
     }
 }

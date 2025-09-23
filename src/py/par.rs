@@ -23,7 +23,7 @@ fn ensure_parallelism_stmt(
         Stmt::WithGpuContext {..} => true,
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::For {..} |
         Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} | Stmt::Label {..} |
-        Stmt::Call {..} => {
+        Stmt::Call {..} | Stmt::StaticFail {..} => {
             s.sfold(acc, |acc, s| ensure_parallelism_stmt(acc, s, par))
         }
     }

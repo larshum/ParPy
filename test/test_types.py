@@ -251,4 +251,4 @@ def test_type_variable_in_buffer_contradiction(backend):
     opts = par_opts(backend, {'N': parpy.threads(32)})
     with pytest.raises(TypeError) as e_info:
         parpy.print_compiled(add_elemwise_type_variables2, [x, y], opts)
-    assert e_info.match("Incompatible element types.*")
+    assert e_info.match("Parameter y was annotated with type .* incompatible with.*")

@@ -4,6 +4,7 @@ use super::specialize;
 use crate::py_internal_error;
 use crate::py_type_error;
 use crate::ext::buffer::DataType;
+use crate::option::CompileOptions;
 use crate::utils::ast::*;
 use crate::utils::err::*;
 use crate::utils::info::*;
@@ -33,20 +34,20 @@ impl UnifyEnv {
         }
     }
 
-    fn lookup_shape_symbol(&self, id: &Name) -> Option<i64> {
+    pub fn lookup_shape_symbol(&self, id: &Name) -> Option<i64> {
         self.shape_vars.get(id).copied()
     }
 
-    fn insert_shape_symbol(mut self, id: Name, n: i64) -> Self {
+    pub fn insert_shape_symbol(mut self, id: Name, n: i64) -> Self {
         self.shape_vars.insert(id, n);
         self
     }
 
-    fn lookup_type_variable(&self, id: &Name) -> Option<ElemSize> {
+    pub fn lookup_type_variable(&self, id: &Name) -> Option<ElemSize> {
         self.type_vars.get(id).cloned()
     }
 
-    fn insert_type_variable(mut self, id: Name, sz: ElemSize) -> Self {
+    pub fn insert_type_variable(mut self, id: Name, sz: ElemSize) -> Self {
         self.type_vars.insert(id, sz);
         self
     }
@@ -79,21 +80,38 @@ fn unify_tensor_elem_size(
     env: UnifyEnv,
     l: TensorElemSize,
     r: TensorElemSize,
-    i: &Info
+    i: &Info,
+    allow_coercion: bool
 ) -> PyResult<(UnifyEnv, TensorElemSize)> {
     match (l, r) {
         (TensorElemSize::Fixed {sz: lsz}, TensorElemSize::Fixed {sz: rsz}) => {
-            let sz = unify_elem_size(lsz.clone(), rsz.clone(), &i)?;
+            let sz = if allow_coercion {
+                unify_elem_size(lsz.clone(), rsz.clone(), &i)
+            } else if lsz == rsz {
+                Ok(lsz)
+            } else {
+                py_type_error!(i, "Failed to unify element types {lsz} and {rsz} \
+                                   (no coercion).")
+            }?;
             Ok((env, TensorElemSize::Fixed {sz}))
         },
         (TensorElemSize::Fixed {sz}, TensorElemSize::Variable {id}) |
         (TensorElemSize::Variable {id}, TensorElemSize::Fixed {sz}) => {
             match env.lookup_type_variable(&id) {
-                Some(var_sz) => match unify_elem_size(sz.clone(), var_sz.clone(), &i) {
-                    Ok(res_sz) => Ok((env, TensorElemSize::Fixed {sz: res_sz})),
-                    Err(_) => py_type_error!(i, "Failed to unify type variable \
-                                                 {id} = {var_sz} with {sz}.")
-                },
+                Some(var_sz) => {
+                    if allow_coercion {
+                        match unify_elem_size(sz.clone(), var_sz.clone(), &i) {
+                            Ok(res_sz) => Ok((env, TensorElemSize::Fixed {sz: res_sz})),
+                            Err(_) => py_type_error!(i, "Failed to unify type variable \
+                                                         {id} = {var_sz} with {sz}.")
+                        }
+                    } else if sz == var_sz {
+                        Ok((env, TensorElemSize::Fixed {sz}))
+                    } else {
+                        py_type_error!(i, "Failed to unify type variable \
+                                           {id} = {var_sz} with {sz} (no coercion).")
+                    }
+                }
                 None => {
                     let env = env.insert_type_variable(id, sz.clone());
                     Ok((env, TensorElemSize::Fixed {sz}))
@@ -103,10 +121,17 @@ fn unify_tensor_elem_size(
         (TensorElemSize::Variable {id: lid}, TensorElemSize::Variable {id: rid}) => {
             match (env.lookup_type_variable(&lid), env.lookup_type_variable(&rid)) {
                 (Some(l), Some(r)) => {
-                    match unify_elem_size(l.clone(), r.clone(), &i) {
-                        Ok(sz) => Ok((env, TensorElemSize::Fixed {sz})),
-                        Err(_) => py_type_error!(i, "Failed to unify type variables \
-                                                     {lid} = {l} and {rid} = {r}.")
+                    if allow_coercion {
+                        match unify_elem_size(l.clone(), r.clone(), &i) {
+                            Ok(sz) => Ok((env, TensorElemSize::Fixed {sz})),
+                            Err(_) => py_type_error!(i, "Failed to unify type variables \
+                                                         {lid} = {l} and {rid} = {r}.")
+                        }
+                    } else if l == r {
+                        Ok((env, TensorElemSize::Fixed {sz: l}))
+                    } else {
+                        py_type_error!(i, "Failed to unify type variables \
+                                           {lid} = {l} and {rid} = {r} (no coercion).")
                     }
                 },
                 (None, Some(sz)) => {
@@ -126,23 +151,15 @@ fn unify_tensor_elem_size(
     }
 }
 
-fn eq_tensor_elem_size(
-    env: &UnifyEnv,
+pub fn eq_tensor_elem_size(
+    env: UnifyEnv,
     l: &TensorElemSize,
     r: &TensorElemSize
-) -> Option<TensorElemSize> {
-    let extract_elem_size = |tsz| match tsz {
-        TensorElemSize::Fixed {sz} => Some(sz),
-        TensorElemSize::Variable {id} => env.lookup_type_variable(&id)
-    };
-    let lsz = extract_elem_size(l.clone());
-    let rsz = extract_elem_size(r.clone());
-    match (lsz, rsz) {
-        (Some(l), Some(r)) if l == r => Some(TensorElemSize::Fixed {sz: l.clone()}),
-        (Some(sz), None) | (None, Some(sz)) => {
-            Some(TensorElemSize::Fixed {sz: sz.clone()})
-        }
-        _ => None
+) -> Option<(UnifyEnv, TensorElemSize)> {
+    if let Ok(res) = unify_tensor_elem_size(env, l.clone(), r.clone(), &Info::default(), false) {
+        Some(res)
+    } else {
+        None
     }
 }
 
@@ -233,11 +250,11 @@ fn unify_types(
         ( Type::Tensor {sz: lsz, shape: lshape}
         , Type::Tensor {sz: rsz, shape: rshape} ) => {
             if lshape.is_empty() && rshape.is_empty() {
-                let (env, sz) = unify_tensor_elem_size(env, lsz, rsz, i)?;
+                let (env, sz) = unify_tensor_elem_size(env, lsz, rsz, i, true)?;
                 Ok((env, Type::Tensor {sz, shape: vec![]}))
             } else {
-                match eq_tensor_elem_size(&env, &lsz, &rsz) {
-                    Some(sz) => {
+                match eq_tensor_elem_size(env, &lsz, &rsz) {
+                    Some((env, sz)) => {
                         let (env, shape) = unify_shapes(env, lshape, rshape, i)?;
                         Ok((env, Type::Tensor {sz, shape}))
                     },
@@ -364,6 +381,9 @@ impl TypeCheckState {
 struct TypeCheckEnv<'py> {
     tops: BTreeMap<String, Bound<'py, PyCapsule>>,
 
+    // The options passed to the compiler.
+    opts: CompileOptions,
+
     // The default sizes to use for int and float literals.
     scalar_sizes: ScalarSizes,
 
@@ -382,9 +402,11 @@ struct TypeCheckEnv<'py> {
 }
 
 impl<'py> TypeCheckEnv<'py> {
-    fn new(tops: BTreeMap<String, Bound<'py, PyCapsule>>, scalar_sizes: ScalarSizes) -> Self {
+    fn new(tops: BTreeMap<String, Bound<'py, PyCapsule>>, opts: CompileOptions) -> Self {
+        let scalar_sizes = ScalarSizes::from_opts(&opts);
         TypeCheckEnv {
             tops,
+            opts,
             scalar_sizes,
             specs: BTreeMap::new(),
             spec_list: vec![],
@@ -501,10 +523,10 @@ fn coerce_type(e: Expr, expected_ty: &Type) -> PyResult<Expr> {
                     // Otherwise, if the types can be unified by coercing either element size, then
                     // we insert an explicit type conversion.
                     let unify_env = UnifyEnv::new(None);
-                    if let Some(_) = eq_tensor_elem_size(&unify_env, &lsz, &rsz) {
+                    if let Some(_) = eq_tensor_elem_size(unify_env.clone(), &lsz, &rsz) {
                         Ok(e)
                     } else {
-                        match unify_tensor_elem_size(unify_env, lsz.clone(), rsz.clone(), &i) {
+                        match unify_tensor_elem_size(unify_env, lsz.clone(), rsz.clone(), &i, true) {
                             Ok(_) => {
                                 let ty = Type::Tensor {sz: rsz.clone(), shape: vec![]};
                                 Ok(Expr::Convert {e: Box::new(e), ty, i})
@@ -514,7 +536,7 @@ fn coerce_type(e: Expr, expected_ty: &Type) -> PyResult<Expr> {
                     }
                 } else {
                     let unify_env = UnifyEnv::new(None);
-                    if let Some(_) = eq_tensor_elem_size(&unify_env, &lsz, &rsz) {
+                    if let Some((unify_env, _)) = eq_tensor_elem_size(unify_env, &lsz, &rsz) {
                         // If the shapes of the two sides can be unified, that means each shape symbol
                         // can be coerced to a unique value.
                         let _ = unify_shapes(unify_env, lsh.clone(), rsh.clone(), &i)?;
@@ -870,7 +892,18 @@ impl TypeCheck for Expr {
                 let (env, e) = e.type_check(env)?;
                 Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
-            Expr::GpuContext {..} | Expr::Label {..} => Ok((env, self))
+            Expr::GpuContext {..} | Expr::Label {..} => Ok((env, self)),
+            Expr::StaticBackendEq {backend, ty: _, i} => {
+                let ty = Type::fixed_scalar(ElemSize::Bool);
+                Ok((env, Expr::StaticBackendEq {backend, ty, i}))
+            },
+            Expr::StaticTypesEq {lhs, rhs, ty: _, i} => {
+                let ty = Type::fixed_scalar(ElemSize::Bool);
+                Ok((env, Expr::StaticTypesEq {lhs, rhs, ty, i}))
+            },
+            Expr::StaticFail {msg, ty: _, i} => {
+                py_internal_error!(i, "Type-checker reached fail node: {msg}")
+            },
         }
     }
 }
@@ -933,7 +966,8 @@ impl TypeCheck for Stmt {
                                              void result, but found {ty}.")
                 }
             },
-            Stmt::Label {label, i} => Ok((env, Stmt::Label {label, i}))
+            Stmt::Label {label, i} => Ok((env, Stmt::Label {label, i})),
+            Stmt::StaticFail {msg, i} => Ok((env, Stmt::StaticFail {msg, i})),
         }
     }
 }
@@ -1025,7 +1059,7 @@ fn type_check_fun_def<'py>(
 
             // 2. Specialize the function body by replacing expressions according to the
             //    environment.
-            let body = specialize::apply(&unify_env, def.body);
+            let body = specialize::apply(&unify_env, &env.opts, def.body)?;
 
             // 3. Apply constant folding to the function body, to ensure that slice bounds can be
             //    determined given the shapes.
@@ -1086,11 +1120,11 @@ pub fn apply<'py>(
     main: FunDef,
     args: &Vec<Bound<'py, PyAny>>,
     tops: BTreeMap<String, Bound<'py, PyCapsule>>,
-    scalar_sizes: &ScalarSizes
+    opts: &CompileOptions
 ) -> PyResult<Ast> {
     let i = main.i.clone();
-    let env = TypeCheckEnv::new(tops, scalar_sizes.clone());
-    let arg_types = extract_argument_types(args, &scalar_sizes, &i)?;
+    let env = TypeCheckEnv::new(tops, opts.clone());
+    let arg_types = extract_argument_types(args, &env.scalar_sizes, &i)?;
     type_check_main(env, main, arg_types)
 }
 
@@ -1655,8 +1689,8 @@ mod test {
     }
 
     fn mk_tcenv<'py>(params: Vec<Param>) -> TypeCheckEnv<'py> {
-        let ssz = ScalarSizes {int: ElemSize::I32, float: ElemSize::F32};
-        let env = TypeCheckEnv::new(BTreeMap::new(), ssz);
+        let opts = CompileOptions::default();
+        let env = TypeCheckEnv::new(BTreeMap::new(), opts);
         env.enter_function(params)
     }
 

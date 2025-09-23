@@ -29,3 +29,12 @@ def convert(e, ty):
 
 def label(x):
     assert x is not None, "parpy.label expects one argument"
+
+def static_backend_eq(x):
+    return False
+
+def static_types_eq(l, r):
+    return l == r
+
+def static_fail(s):
+    raise RuntimeError(s)

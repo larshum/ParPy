@@ -115,3 +115,20 @@ def test_unbound_shape_variable(backend):
             for i in range(N):
                 x[i] = 0.0
     assert e_info.match(r"Found reference to unused shape variable N")
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_unbound_type_variable(backend):
+    ty1 = parpy.types.type_var()
+    ty2 = parpy.types.type_var()
+    N = parpy.types.symbol()
+
+    @parpy.jit
+    def unbound_type_var_conversion(x: parpy.types.buffer(ty1, [N])):
+        with parpy.gpu:
+            x[0] = parpy.operators.convert(1.0, ty2)
+
+    x = np.ndarray((1,), np.float32)
+    opts = par_opts(backend, {})
+    with pytest.raises(RuntimeError) as e_info:
+        parpy.print_compiled(unbound_type_var_conversion, [x], opts)
+    assert e_info.match("Found unresolved type variable")

@@ -74,7 +74,7 @@ pub fn specialize_ast_on_arguments<'py>(
     // top-level definitions. Before printing the AST, we eliminate unnecessary duplicates of the
     // same function, as the type-checker may produce such instances.
     let scalar_sizes = ScalarSizes::from_opts(&opts);
-    let ast = type_check::apply(main, &args, tops, &scalar_sizes)?;
+    let ast = type_check::apply(main, &args, tops, &opts)?;
     let ast = eliminate_duplicate_functions::apply(ast)?;
     debug_env.print("Python-like AST after type-checking", &ast);
 

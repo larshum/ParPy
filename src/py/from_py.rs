@@ -1,6 +1,7 @@
 use super::ast::*;
 use crate::py_runtime_error;
 use crate::ext::types::{ExtType, TypeVar};
+use crate::option::CompileBackend;
 use crate::utils::err::*;
 use crate::utils::info::*;
 use crate::utils::name::Name;
@@ -219,20 +220,86 @@ fn convert_type_conversion_builtin<'py, 'a>(
     }
 }
 
+fn convert_builtin_string_arg<'py, 'a>(
+   mut args: Vec<Bound<'py, PyAny>>,
+   env: &ConvertEnv<'py, 'a>,
+   i: &Info,
+   id: &str
+) -> PyResult<String> {
+    let n = args.len();
+    if n == 1 {
+        match convert_expr(args.pop().unwrap(), env)? {
+            Expr::String {v, ..} => Ok(v),
+            _ => py_runtime_error!(i, "{id} builtin expects a string argument")
+        }
+    } else {
+        py_runtime_error!(i, "{id} builtin expects one argument but found {n}")
+    }
+}
+
 fn convert_label_builtin<'py, 'a>(
+    args: Vec<Bound<'py, PyAny>>,
+    env: &ConvertEnv<'py, 'a>,
+    i: Info
+) -> PyResult<Expr> {
+    let label = convert_builtin_string_arg(args, &env, &i, "Label")?;
+    Ok(Expr::Label {label, ty: Type::Unknown, i})
+}
+
+fn convert_fail_builtin<'py, 'a>(
+    args: Vec<Bound<'py, PyAny>>,
+    env: &ConvertEnv<'py, 'a>,
+    i: Info
+) -> PyResult<Expr> {
+    let msg = convert_builtin_string_arg(args, &env, &i, "Fail")?;
+    Ok(Expr::StaticFail {msg, ty: Type::Unknown, i})
+}
+
+fn convert_static_backend_equality<'py, 'a>(
     mut args: Vec<Bound<'py, PyAny>>,
     env: &ConvertEnv<'py, 'a>,
     i: Info
 ) -> PyResult<Expr> {
     let n = args.len();
     if n == 1 {
-        let label = match convert_expr(args.pop().unwrap(), env)? {
-            Expr::String {v, ..} => Ok(v),
-            _ => py_runtime_error!(i, "Label builtin expects a string argument")
-        }?;
-        Ok(Expr::Label {label, ty: Type::Unknown, i})
+        let arg = args.pop().unwrap();
+        let py = arg.py();
+        match eval_node(&arg, &env, py) {
+            Ok(v) => {
+                if let Ok(backend) = v.extract::<CompileBackend>() {
+                    Ok(Expr::StaticBackendEq {backend, ty: Type::Unknown, i})
+                } else {
+                    py_runtime_error!(i, "Static backend equality expects a \
+                                          CompileBackend argument")
+                }
+            },
+            Err(e) => py_runtime_error!(i, "Failed to resolve backend: {e}")
+        }
     } else {
-        py_runtime_error!(i, "Label builtin expects one argument but found {n}")
+        py_runtime_error!(i, "Static backend equality expects one argument but found {n}")
+    }
+}
+
+fn convert_static_types_equality<'py, 'a>(
+    mut args: Vec<Bound<'py, PyAny>>,
+    env: &ConvertEnv<'py, 'a>,
+    i: Info
+) -> PyResult<Expr> {
+    let n = args.len();
+    if n == 2 {
+        let rhs = match try_extract_type_annotation(args.pop().unwrap(), env, &i) {
+            Ok(Type::Tensor {sz, ..}) => Ok(sz),
+            _ => py_runtime_error!(i, "Second argument of static type \
+                                       equality must be a ParPy type.")
+        }?;
+        let lhs = match try_extract_type_annotation(args.pop().unwrap(), env, &i) {
+            Ok(Type::Tensor {sz, ..}) => Ok(sz),
+            _ => py_runtime_error!(i, "First argument of static type \
+                                       equality must be a ParPy type.")
+        }?;
+        Ok(Expr::StaticTypesEq {lhs, rhs, ty: Type::Unknown, i})
+    } else {
+        py_runtime_error!(i, "Static types equality expects two arguments but found {n}")
     }
 }
 
@@ -294,6 +361,14 @@ fn convert_builtin<'py, 'a>(
             // Labeling (only usable as a statement)
             } else if e.eq(parpy_ops.getattr("label")?)? {
                 Some(convert_label_builtin(args, env, i)?)
+
+            // Statically evaluated nodes used for compile-time specialization
+            } else if e.eq(parpy_ops.getattr("static_backend_eq")?)? {
+                Some(convert_static_backend_equality(args, env, i)?)
+            } else if e.eq(parpy_ops.getattr("static_types_eq")?)? {
+                Some(convert_static_types_equality(args, env, i)?)
+            } else if e.eq(parpy_ops.getattr("static_fail")?)? {
+                Some(convert_fail_builtin(args, env, i)?)
             } else {
                 None
             };
@@ -504,6 +579,9 @@ fn construct_expr_stmt(
     match value {
         Expr::Label {label, ..} => {
             Ok(Stmt::Label {label, i: i.clone()})
+        },
+        Expr::StaticFail {msg, ..} => {
+            Ok(Stmt::StaticFail {msg, i: i.clone()})
         },
         Expr::Call {id, args, ..} => {
             Ok(Stmt::Call {func: id, args, i: i.clone()})
