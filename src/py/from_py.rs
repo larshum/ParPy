@@ -795,14 +795,42 @@ fn convert_params<'py, 'a>(
         .collect::<PyResult<Vec<Param>>>()
 }
 
+fn strip_docstring<'py, 'a>(
+    body: Bound<'py, PyAny>,
+    env: &ConvertEnv<'py, 'a>
+) -> PyResult<Bound<'py, PyAny>> {
+    let py = body.py();
+    let stmts = body.getattr("body")?;
+    let fst_stmt = stmts.get_item(0)?;
+    if fst_stmt.is_instance(&env.ast.getattr("Expr")?)? {
+        let expr = fst_stmt.getattr("value")?;
+        if expr.is_instance(&env.ast.getattr("Constant")?)? {
+            let value = expr.getattr("value")?;
+            if value.is_instance(&PyString::type_object(py))? {
+                let body = stmts.try_iter()?
+                    .skip(1)
+                    .collect::<PyResult<Vec<Bound<'py, PyAny>>>>()?;
+                Ok(body.into_pyobject(py)?)
+            } else {
+                Ok(stmts)
+            }
+        } else {
+            Ok(stmts)
+        }
+    } else {
+        Ok(stmts)
+    }
+}
+
 fn convert_fun_def<'py, 'a>(
     ast: Bound<'py, PyAny>,
     env: &ConvertEnv<'py, 'a>
 ) -> PyResult<FunDef> {
     let body = ast.getattr("body")?.get_item(0)?;
-    let params = convert_params(&body, env)?;
+    let params = convert_params(&body, &env)?;
     let id = Name::new(body.getattr("name")?.extract::<String>()?);
-    let ir_body = convert_stmts(body.getattr("body")?, &env)?;
+    let body = strip_docstring(body, &env)?;
+    let ir_body = convert_stmts(body, &env)?;
     let i = merge_body_infos(&ir_body);
     Ok(FunDef {id, params, body: ir_body, res_ty: Type::Unknown, i})
 }
