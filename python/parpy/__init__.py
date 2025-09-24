@@ -1,6 +1,7 @@
 from . import parpy
 from . import backend
 from . import buffer
+from . import math
 from . import operators
 from . import types
 

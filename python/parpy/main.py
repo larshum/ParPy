@@ -1,6 +1,6 @@
 from . import backend, parpy
 
-from parpy import par, CompileBackend, CompileOptions, ElemSize, Target
+from .parpy import par, CompileBackend, CompileOptions, ElemSize, Target
 
 _ir_asts = {}
 _ext_decls = {}
@@ -63,7 +63,7 @@ def _check_kwarg(kwargs, key, expected_ty, fun_name):
         raise RuntimeError(f"The keyword argument {key} should be of type {ty}")
 
 def _validate_external_type(target, backend, par):
-    from parpy import CompileBackend, Target
+    from .parpy import CompileBackend, Target
     if backend == CompileBackend.Cuda:
         if target == Target.Host:
             raise RuntimeError(f"Host externals are not supported in the CUDA backend")
