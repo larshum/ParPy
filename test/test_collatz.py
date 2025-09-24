@@ -13,7 +13,7 @@ def collatz(out, N):
         count = 0
         while v > 1:
             if v % 2 == 0:
-                v = v / 2
+                v = v // 2
             else:
                 v = 3 * v + 1
             count = count + 1
