@@ -566,7 +566,16 @@ impl PrettyPrint for Top {
 
 impl PrettyPrint for Ast {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        pprint_iter(self.iter(), env, "\n")
+        // Perform the pretty-printing in reverse order, to ensure that the name of the main
+        // function is never escaped over called functions.
+        let (env, strs) = self.iter().rev()
+            .fold((env, vec![]), |acc, t| {
+                let (env, mut strs) = acc;
+                let (env, s) = t.pprint(env);
+                strs.push(s);
+                (env, strs)
+            });
+        (env, strs.into_iter().rev().join("\n"))
     }
 }
 
