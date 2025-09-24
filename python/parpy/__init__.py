@@ -15,8 +15,12 @@ _ext_decls = {}
 _ext_tops = {}
 _fun_cache = {}
 
+def _qualified_name(fn):
+    import inspect
+    return f"{inspect.getmodule(fn).__name__}.{fn.__name__}"
+
 def _get_tops(backend):
-    ast_tops = {k.__name__: v for k, v in _ir_asts.items()}
+    ast_tops = {_qualified_name(k): v for k, v in _ir_asts.items()}
     if backend is not None:
         if backend in _ext_decls:
             ext_tops = _ext_decls[backend]
@@ -217,8 +221,8 @@ def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()
         ext_decl = _declare_external(fn, ext_name, target, header, parallelize, vars)
         if not backend in _ext_decls:
             _ext_decls[backend] = {}
-        _ext_decls[backend][fn.__name__] = ext_decl
-        _ext_tops[fn.__name__] = ext_decl
+        _ext_decls[backend][_qualified_name(fn)] = ext_decl
+        _ext_tops[_qualified_name(fn)] = ext_decl
         return inner
     return external_wrap
 

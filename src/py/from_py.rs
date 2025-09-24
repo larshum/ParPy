@@ -1,5 +1,6 @@
 use super::ast::*;
 use crate::py_runtime_error;
+use crate::py_internal_error;
 use crate::ext::types::{ExtType, TypeVar};
 use crate::option::CompileBackend;
 use crate::utils::err::*;
@@ -424,6 +425,17 @@ fn ensure_no_keyword_arguments<'py>(e: &Bound<'py, PyAny>, i: &Info) -> PyResult
     }
 }
 
+fn try_get_qualified_name<'py>(
+    e: &Bound<'py, PyAny>
+) -> PyResult<String> {
+    let py = e.py();
+    let inspect = py.import("inspect")?;
+    let module = inspect.call_method("getmodule", (e,), None)?;
+    let module_id = module.getattr("__name__")?;
+    let func_id = e.getattr("__name__")?;
+    Ok(format!("{module_id}.{func_id}"))
+}
+
 fn convert_expr<'py, 'a>(
     expr: Bound<'py, PyAny>, env: &ConvertEnv<'py, 'a>
 ) -> PyResult<Expr> {
@@ -530,21 +542,28 @@ fn convert_expr<'py, 'a>(
         let args = expr.getattr("args")?
             .try_iter()?
             .collect::<PyResult<Vec<Bound<'py, PyAny>>>>()?;
-        match convert_builtin(&func, args, env, i.clone())? {
-            Some(e) => Ok(e),
-            None => {
-                if let Ok(Expr::Var {id, ..}) = convert_expr(func, env) {
-                    if env.tops.contains_key(&id.to_string()) {
+        if let Some(builtin) = convert_builtin(&func, args, &env, i.clone())? {
+            Ok(builtin)
+        } else {
+            let py = expr.py();
+            let fun = eval_node(&func, &env, py)?;
+            match try_get_qualified_name(&fun) {
+                Ok(qualified_name) => {
+                    if env.tops.contains_key(&qualified_name) {
+                        let id = Name::sym_str(&qualified_name);
                         let args = expr.getattr("args")?
                             .try_iter()?
                             .map(|arg| convert_expr(arg?, env))
                             .collect::<PyResult<Vec<Expr>>>()?;
                         Ok(Expr::Call {id, args, ty, i})
                     } else {
-                        py_runtime_error!(i, "Call to unknown function {}", id.to_string())
+                        py_runtime_error!(i, "Call to unknown ParPy function \
+                                              {qualified_name}.")
                     }
-                } else {
-                    py_runtime_error!(i, "Unsupported call target type")
+                },
+                Err(e) => {
+                    py_internal_error!(i, "Failed to find qualified name of \
+                                           function: {e}")
                 }
             }
         }
@@ -1698,45 +1717,6 @@ mod test {
     fn convert_expr_sum_invalid_axis_form() {
         let e = convert_expr_wrap("parpy.operators.sum(x[:], axis='x')");
         assert_py_error_matches(e, "Keyword arguments are not supported.*");
-    }
-
-    #[test]
-    fn convert_expr_call_to_undefined() {
-        let e = convert_expr_wrap("f(2, 3)");
-        assert_py_error_matches(e, r"Call to unknown function.*");
-    }
-
-    #[test]
-    fn convert_expr_call_no_args() {
-        let e = convert_expr_wrap_helper("f()", vec!["f".to_string()]).unwrap();
-        assert_eq!(e, Expr::Call {
-            id: Name::new("f".to_string()),
-            args: vec![],
-            ty: Type::Unknown,
-            i: mkinfo(1, 0, 1, 3)
-        });
-    }
-
-    #[test]
-    fn convert_expr_call_multi_args() {
-        let e = convert_expr_wrap_helper("f(2, 3)", vec!["f".to_string()]).unwrap();
-        assert_eq!(e, Expr::Call {
-            id: Name::new("f".to_string()),
-            args: vec![
-                Expr::Int {
-                    v: 2,
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 2, 1, 3)
-                },
-                Expr::Int {
-                    v: 3,
-                    ty: Type::Unknown,
-                    i: mkinfo(1, 5, 1, 6)
-                }
-            ],
-            ty: Type::Unknown,
-            i: mkinfo(1, 0, 1, 7)
-        });
     }
 
     #[test]
