@@ -289,6 +289,12 @@ impl PrettyPrint for Expr {
                 let (env, value) = value.pprint(env);
                 (env, format!("cudaFuncSetAttribute({func}, {attr}, {value})"))
             },
+            Expr::ShflXorSync {mask, value, offset, ..} => {
+                let (env, mask) = mask.pprint(env);
+                let (env, value) = value.pprint(env);
+                let (env, offset) = offset.pprint(env);
+                (env, format!("__shfl_xor_sync({mask}, {value}, {offset})"))
+            },
             Expr::MallocAsync {id, elem_ty, sz, stream, ..} => {
                 let (env, id) = id.pprint(env);
                 let (env, elem_ty) = elem_ty.pprint(env);
