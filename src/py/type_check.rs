@@ -663,23 +663,16 @@ fn type_check_binop(
     let lhs = coerce_type(lhs, &ty)?;
     let rhs = coerce_type(rhs, &ty)?;
     let ty = match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul |
-        BinOp::Div if ty.is_int_scalar() || ty.is_float_scalar() => {
+        BinOp::Add | BinOp::Sub |
+        BinOp::Mul if ty.is_int_scalar() || ty.is_float_scalar() => {
             Ok(ty)
         },
-        BinOp::FloorDiv | BinOp::Rem if ty.is_int_scalar() => {
-            Ok(ty)
-        },
-        BinOp::Pow | BinOp::Atan2 if ty.is_float_scalar() => {
-            Ok(ty)
-        },
-        BinOp::And | BinOp::Or if ty.is_bool_scalar() => {
-            Ok(ty)
-        },
+        BinOp::Div if ty.is_float_scalar() => Ok(ty),
+        BinOp::FloorDiv | BinOp::Rem if ty.is_int_scalar() => Ok(ty),
+        BinOp::Pow | BinOp::Atan2 if ty.is_float_scalar() => Ok(ty),
+        BinOp::And | BinOp::Or if ty.is_bool_scalar() => Ok(ty),
         BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor |
-        BinOp::BitShl | BinOp::BitShr if ty.is_int_scalar() => {
-            Ok(ty)
-        },
+        BinOp::BitShl | BinOp::BitShr if ty.is_int_scalar() => Ok(ty),
         BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq |
         BinOp::Lt | BinOp::Gt if ty.is_scalar() => {
             Ok(Type::fixed_scalar(ElemSize::Bool))
