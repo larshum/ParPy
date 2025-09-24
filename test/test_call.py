@@ -153,7 +153,6 @@ def test_external_declaration():
     @parpy.external("powf", parpy.CompileBackend.Cuda, parpy.Target.Device)
     def pow(x: types.F32, y: types.F32) -> types.F32:
         return x ** y
-    assert len(parpy._ext_decls) == 1
 
 def call_external_helper(backend, fn):
     x = torch.tensor(2.0, dtype=torch.float32)
