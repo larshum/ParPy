@@ -13,41 +13,41 @@ def sum_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.operators.sum(x[i,:])
+        out[i] = parpy.builtin.sum(x[i,:])
 
 def prod_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.operators.prod(x[i,:])
+        out[i] = parpy.builtin.prod(x[i,:])
 
 def max_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.operators.max(x[i,:])
+        out[i] = parpy.builtin.max(x[i,:])
 
 def min_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.operators.min(x[i,:])
+        out[i] = parpy.builtin.min(x[i,:])
 
 def sum_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.operators.sum(x[:,:])
+    out[0] = parpy.builtin.sum(x[:,:])
 
 def prod_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.operators.prod(x[:,:])
+    out[0] = parpy.builtin.prod(x[:,:])
 
 def max_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.operators.max(x[:,:])
+    out[0] = parpy.builtin.max(x[:,:])
 
 def min_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.operators.min(x[:,:])
+    out[0] = parpy.builtin.min(x[:,:])
 
 def reduce_wrap(reduce_fn, x, opts=None):
     N, M = x.shape

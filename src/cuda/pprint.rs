@@ -57,60 +57,15 @@ impl PrettyPrintUnOp<Type> for Expr {
     fn is_function(op: &UnOp) -> bool {
         match op {
             UnOp::Sub | UnOp::Not | UnOp::BitNeg | UnOp::Addressof => false,
-            UnOp::Exp | UnOp::Log | UnOp::Cos | UnOp::Sin | UnOp::Sqrt |
-            UnOp::Tanh | UnOp::Abs => true,
         }
     }
 
-    fn print_unop(op: &UnOp, argty: &Type) -> Option<String> {
+    fn print_unop(op: &UnOp, _argty: &Type) -> Option<String> {
         let o = match op {
             UnOp::Sub => Some("-"),
             UnOp::Not => Some("!"),
             UnOp::BitNeg => Some("~"),
             UnOp::Addressof => Some("&"),
-            UnOp::Exp => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("hexp"),
-                Some(ElemSize::F32) => Some("__expf"),
-                Some(ElemSize::F64) => Some("exp"),
-                _ => None
-            },
-            UnOp::Log => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("hlog"),
-                Some(ElemSize::F32) => Some("__logf"),
-                Some(ElemSize::F64) => Some("log"),
-                _ => None
-            },
-            UnOp::Cos => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("hcos"),
-                Some(ElemSize::F32) => Some("__cosf"),
-                Some(ElemSize::F64) => Some("cos"),
-                _ => None
-            },
-            UnOp::Sin => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("hsin"),
-                Some(ElemSize::F32) => Some("__sinf"),
-                Some(ElemSize::F64) => Some("sin"),
-                _ => None
-            },
-            UnOp::Sqrt => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("hsqrt"),
-                Some(ElemSize::F32) => Some("sqrtf"),
-                Some(ElemSize::F64) => Some("sqrt"),
-                _ => None
-            },
-            UnOp::Tanh => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("htanh"),
-                Some(ElemSize::F32) => Some("tanhf"),
-                Some(ElemSize::F64) => Some("tanh"),
-                _ => None
-            },
-            UnOp::Abs => match argty.get_scalar_elem_size() {
-                Some(ElemSize::F16) => Some("__habs"),
-                Some(ElemSize::F32) => Some("fabsf"),
-                Some(ElemSize::F64) => Some("fabs"),
-                Some(_) => Some("abs"),
-                _ => None
-            },
         };
         o.map(|s| s.to_string())
     }
@@ -131,7 +86,7 @@ impl PrettyPrintBinOp<Type> for Expr {
             _ => false
         };
         match op {
-            BinOp::Pow | BinOp::Max | BinOp::Min | BinOp::Atan2 => false,
+            BinOp::Pow | BinOp::Max | BinOp::Min => false,
             BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq | BinOp::Lt |
             BinOp::Gt if is_f16 => false,
             _ => true
@@ -196,7 +151,6 @@ impl PrettyPrintBinOp<Type> for Expr {
                 Some(_) => Some("min"),
                 None => None,
             },
-            BinOp::Atan2 => Some("atan2"),
         };
         o.map(|s| s.to_string())
     }
@@ -288,6 +242,12 @@ impl PrettyPrint for Expr {
                 let (env, attr) = attr.pprint(env);
                 let (env, value) = value.pprint(env);
                 (env, format!("cudaFuncSetAttribute({func}, {attr}, {value})"))
+            },
+            Expr::ShflXorSync {mask, value, offset, ..} => {
+                let (env, mask) = mask.pprint(env);
+                let (env, value) = value.pprint(env);
+                let (env, offset) = offset.pprint(env);
+                (env, format!("__shfl_xor_sync({mask}, {value}, {offset})"))
             },
             Expr::MallocAsync {id, elem_ty, sz, stream, ..} => {
                 let (env, id) = id.pprint(env);
@@ -566,7 +526,16 @@ impl PrettyPrint for Top {
 
 impl PrettyPrint for Ast {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        pprint_iter(self.iter(), env, "\n")
+        // Perform the pretty-printing in reverse order, to ensure that the name of the main
+        // function is never escaped over called functions.
+        let (env, strs) = self.iter().rev()
+            .fold((env, vec![]), |acc, t| {
+                let (env, mut strs) = acc;
+                let (env, s) = t.pprint(env);
+                strs.push(s);
+                (env, strs)
+            });
+        (env, strs.into_iter().rev().join("\n"))
     }
 }
 
@@ -588,17 +557,7 @@ mod test {
     fn unop_print() {
         for op in UnOp::iter() {
             for sz in ElemSize::iter() {
-                match op {
-                    UnOp::Sub | UnOp::Not | UnOp::BitNeg | UnOp::Addressof | UnOp::Abs => {
-                        assert!(Expr::print_unop(&op, &scalar(sz)).is_some());
-                    },
-                    _ if sz.is_floating_point() => {
-                        assert!(Expr::print_unop(&op, &scalar(sz)).is_some());
-                    },
-                    _ => {
-                        assert!(Expr::print_unop(&op, &scalar(sz)).is_none());
-                    }
-                }
+                assert!(Expr::print_unop(&op, &scalar(sz)).is_some());
             }
         }
     }
@@ -614,7 +573,7 @@ mod test {
                     BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor |
                     BinOp::BitShl | BinOp::BitShr | BinOp::Eq | BinOp::Neq |
                     BinOp::Leq | BinOp::Geq | BinOp::Lt | BinOp::Gt | BinOp::Max |
-                    BinOp::Min | BinOp::Atan2 => {
+                    BinOp::Min => {
                         assert!(Expr::print_binop(&op, &ty, &ty).is_some());
                     },
                     BinOp::Pow if sz.is_floating_point() => {
@@ -699,25 +658,6 @@ mod test {
     fn pprint_block_idx_y() {
         let s = Expr::BlockIdx {dim: Dim::Y, ty: i64_ty(), i: Info::default()}.pprint_default();
         assert_eq!(&s, "blockIdx.y");
-    }
-
-    #[test]
-    #[should_panic]
-    fn pprint_exp_int_type_fails() {
-        exp(var("x", scalar(ElemSize::I32)), scalar(ElemSize::I32)).pprint_default();
-    }
-
-    #[test]
-    #[should_panic]
-    fn pprint_exp_invalid_type_fails() {
-        exp(uvar("x"), scalar(ElemSize::Bool)).pprint_default();
-    }
-
-    #[test]
-    fn pprint_log_f64() {
-        let ty = scalar(ElemSize::F64);
-        let s = log(var("x", ty.clone()), ty).pprint_default();
-        assert_eq!(&s, "log(x)");
     }
 
     #[test]

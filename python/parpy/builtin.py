@@ -1,6 +1,4 @@
-from builtins import abs
-from numpy import cos, exp, inf, log, sin, sqrt, tanh
-from numpy import arctan2 as atan2
+from numpy import inf
 import numpy as np
 import contextlib
 
@@ -11,12 +9,6 @@ def max(x):
 
 def min(x):
     return np.min(x)
-
-def maximum(x, y):
-    return np.maximum(x, y)
-
-def minimum(x, y):
-    return np.minimum(x, y)
 
 def sum(x):
     return np.sum(x)

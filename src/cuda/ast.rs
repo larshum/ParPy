@@ -67,6 +67,9 @@ pub enum Expr {
     FuncSetAttribute {
         func: Name, attr: FuncAttribute, value: Box<Expr>, ty: Type, i: Info
     },
+    ShflXorSync {
+        mask: Box<Expr>, value: Box<Expr>, offset: Box<Expr>, ty: Type, i: Info
+    },
     MallocAsync {
         id: Name, elem_ty: Type, sz: usize, stream: Stream, ty: Type, i: Info
     },
@@ -102,6 +105,7 @@ impl ExprType<Type> for Expr {
             Expr::Error {ty, ..} => ty,
             Expr::GetLastError {ty, ..} => ty,
             Expr::FuncSetAttribute {ty, ..} => ty,
+            Expr::ShflXorSync {ty, ..} => ty,
             Expr::MallocAsync {ty, ..} => ty,
             Expr::FreeAsync {ty, ..} => ty,
             Expr::StreamCreate {ty, ..} => ty,
@@ -147,6 +151,7 @@ impl InfoNode for Expr {
             Expr::Error {i, ..} => i.clone(),
             Expr::GetLastError {i, ..} => i.clone(),
             Expr::FuncSetAttribute {i, ..} => i.clone(),
+            Expr::ShflXorSync {i, ..} => i.clone(),
             Expr::MallocAsync {i, ..} => i.clone(),
             Expr::FreeAsync {i, ..} => i.clone(),
             Expr::StreamCreate {i, ..} => i.clone(),
@@ -219,11 +224,12 @@ impl SMapAccum<Expr> for Expr {
             },
             Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
             Expr::ThreadIdx {..} | Expr::BlockIdx {..} | Expr::Error {..} |
-            Expr::GetLastError {..} | Expr::MallocAsync {..} | Expr::FreeAsync {..} |
-            Expr::StreamCreate {..} | Expr::StreamDestroy {..} | Expr::StreamBeginCapture {..} |
-            Expr::StreamEndCapture {..} | Expr::GraphDestroy {..} |
-            Expr::GraphExecInstantiate {..} | Expr::GraphExecDestroy {..} |
-            Expr::GraphExecUpdate {..} | Expr::GraphExecLaunch {..} => Ok((acc?, self)),
+            Expr::GetLastError {..} | Expr::ShflXorSync {..} |  Expr::MallocAsync {..} |
+            Expr::FreeAsync {..} | Expr::StreamCreate {..} | Expr::StreamDestroy {..} |
+            Expr::StreamBeginCapture {..} | Expr::StreamEndCapture {..} |
+            Expr::GraphDestroy {..} | Expr::GraphExecInstantiate {..} |
+            Expr::GraphExecDestroy {..} | Expr::GraphExecUpdate {..} |
+            Expr::GraphExecLaunch {..} => Ok((acc?, self)),
         }
     }
 }
@@ -246,8 +252,8 @@ impl SFold<Expr> for Expr {
             Expr::FuncSetAttribute {value, ..} => f(acc?, value),
             Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
             Expr::Error {..} | Expr::GetLastError {..} | Expr::ThreadIdx {..} |
-            Expr::BlockIdx {..} | Expr::MallocAsync {..} | Expr::FreeAsync {..} |
-            Expr::StreamCreate {..} | Expr::StreamDestroy {..} |
+            Expr::BlockIdx {..} | Expr::ShflXorSync {..} | Expr::MallocAsync {..} |
+            Expr::FreeAsync {..} | Expr::StreamCreate {..} | Expr::StreamDestroy {..} |
             Expr::StreamBeginCapture {..} | Expr::StreamEndCapture {..} |
             Expr::GraphDestroy {..} | Expr::GraphExecInstantiate {..} |
             Expr::GraphExecDestroy {..} | Expr::GraphExecUpdate {..} |

@@ -90,8 +90,6 @@ impl PrettyPrintUnOp<Type> for Expr {
     fn is_function(op: &UnOp) -> bool {
         match op {
             UnOp::Sub | UnOp::Not | UnOp::BitNeg | UnOp::Addressof => false,
-            UnOp::Exp | UnOp::Log | UnOp::Cos | UnOp::Sin | UnOp::Sqrt |
-            UnOp::Tanh | UnOp::Abs => true,
         }
     }
 
@@ -100,13 +98,6 @@ impl PrettyPrintUnOp<Type> for Expr {
             UnOp::Sub => "-",
             UnOp::Not => "!",
             UnOp::BitNeg => "~",
-            UnOp::Exp => "exp",
-            UnOp::Log => "log",
-            UnOp::Cos => "cos",
-            UnOp::Sin => "sin",
-            UnOp::Sqrt => "sqrt",
-            UnOp::Tanh => "tanh",
-            UnOp::Abs => "abs",
             UnOp::Addressof => "&",
         };
         Some(s.to_string())
@@ -128,7 +119,7 @@ impl PrettyPrintBinOp<Type> for Expr {
             _ => false
         };
         match op {
-            BinOp::Pow | BinOp::Max | BinOp::Min | BinOp::Atan2 => false,
+            BinOp::Pow | BinOp::Max | BinOp::Min => false,
             BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq | BinOp::Lt |
             BinOp::Gt if is_f16 => false,
             _ => true
@@ -158,7 +149,6 @@ impl PrettyPrintBinOp<Type> for Expr {
             BinOp::Gt => ">",
             BinOp::Max => "max",
             BinOp::Min => "min",
-            BinOp::Atan2 => "atan2",
         };
         Some(s.to_string())
     }
@@ -560,28 +550,8 @@ mod test {
         assert_eq!(&s, "blockIdx.y");
     }
 
-    fn exp(arg: Expr, ty: Type) -> Expr {
-        unop(UnOp::Exp, arg, ty)
-    }
-
-    fn log(arg: Expr, ty: Type) -> Expr {
-        unop(UnOp::Log, arg, ty)
-    }
-
     fn max(lhs: Expr, rhs: Expr, ty: Type) -> Expr {
         binop(lhs, BinOp::Max, rhs, ty)
-    }
-
-    #[test]
-    fn pprint_exp_f32() {
-        let s = exp(uvar("x"), scalar(ElemSize::F32)).pprint_default();
-        assert_eq!(&s, "exp(x)");
-    }
-
-    #[test]
-    fn pprint_log_f64() {
-        let s = log(uvar("x"), scalar(ElemSize::F64)).pprint_default();
-        assert_eq!(&s, "log(x)");
     }
 
     #[test]

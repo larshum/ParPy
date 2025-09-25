@@ -30,7 +30,7 @@ def parpy_add_mul_nested(x, y, N):
 @parpy.jit
 def parpy_sum_call(x, y):
     with parpy.gpu:
-        y[0] = parpy.operators.sum(x[:])
+        y[0] = parpy.builtin.sum(x[:])
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_direct_call_expr(backend):
@@ -134,17 +134,17 @@ def test_call_non_decorated_function_fails():
             parpy.label('N')
             for i in range(N):
                 non_decorated_add(x[i], y[i], M)
-    assert e_info.match(r".*unknown function non_decorated_add.*")
+    assert e_info.match(r"Call to unknown ParPy function .*non_decorated_add.*")
 
 def test_recursive_call_fails():
-    with pytest.raises(RuntimeError) as e_info:
+    with pytest.raises(NameError) as e_info:
         @parpy.jit
         def reset(x, i):
             with parpy.gpu:
                 if i > 0:
                     x[i] = 0.0
                     reset(x, i-1)
-    assert e_info.match(r".*unknown function reset.*")
+    assert e_info.match(r"name 'reset' is not defined")
 
 def test_external_declaration():
     import parpy.types as types
@@ -153,7 +153,6 @@ def test_external_declaration():
     @parpy.external("powf", parpy.CompileBackend.Cuda, parpy.Target.Device)
     def pow(x: types.F32, y: types.F32) -> types.F32:
         return x ** y
-    assert len(parpy._ext_decls) == 1
 
 def call_external_helper(backend, fn):
     x = torch.tensor(2.0, dtype=torch.float32)
@@ -162,35 +161,38 @@ def call_external_helper(backend, fn):
     assert torch.allclose(y, torch.sqrt(x))
 
 def call_external_helper_cuda():
+    import parpy.types as types
+    ext_name = "sqrtf"
+    header = None
+    backend = parpy.CompileBackend.Cuda
+
+    @parpy.external(ext_name, backend, parpy.Target.Device, header=header)
+    def sqrt_ext(x: types.F32) -> types.F32:
+        return np.sqrt(x)
     @parpy.jit
     def ext_sqrt(x, y):
         with parpy.gpu:
             y[0] = sqrt_ext(x)
-    call_external_helper(parpy.CompileBackend.Cuda, ext_sqrt)
+    call_external_helper(backend, ext_sqrt)
 
 def call_external_helper_metal():
+    import parpy.types as types
+    ext_name = "metal::sqrt"
+    header = "<metal_math>"
+    backend = parpy.CompileBackend.Metal
+
+    @parpy.external(ext_name, backend, parpy.Target.Device, header=header)
+    def sqrt_ext(x: types.F32) -> types.F32:
+        return np.sqrt(x)
     @parpy.jit
     def ext_sqrt(x, y):
         with parpy.gpu:
             y[0] = sqrt_ext(x)
-    call_external_helper(parpy.CompileBackend.Metal, ext_sqrt)
+    call_external_helper(backend, ext_sqrt)
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_call_external(backend):
-    import parpy.types as types
     def helper():
-        if backend == parpy.CompileBackend.Cuda:
-            ext_name = "sqrtf"
-            header = None
-        elif backend == parpy.CompileBackend.Metal:
-            ext_name = "metal::sqrt"
-            header = "<metal_math>"
-        else:
-            raise RuntimeError(f"Unsupported backend {backend}")
-
-        @parpy.external(ext_name, backend, parpy.Target.Device, header=header)
-        def sqrt_ext(x: types.F32) -> types.F32:
-            return np.sqrt(x)
         if backend == parpy.CompileBackend.Cuda:
             call_external_helper_cuda()
         elif backend == parpy.CompileBackend.Metal:
@@ -220,7 +222,7 @@ def test_invalid_backend_call(backend):
                     x[:] = zero()
             x = torch.zeros(10, dtype=torch.int32)
             f(x, opts=par_opts(backend, {}))
-        assert e_info.match(r"Call to unknown function zero.*")
+        assert e_info.match(r"Call to unknown function .*zero.*")
     run_if_backend_is_enabled(backend, helper)
 
 @pytest.mark.parametrize('backend', compiler_backends)
@@ -238,3 +240,19 @@ def test_invalid_return_type_annotation(backend):
         def dummy(x: parpy.types.I32) -> int:
             return x
     assert e_info.match("Unsupported return type annotation on external function")
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_call_other_module_function(backend):
+    def helper():
+        import test_static_eq
+        @parpy.jit
+        def set_value_based_on_backend(x):
+            test_static_eq.parpy_backend_set_value(x)
+        x = torch.zeros((1,), dtype=torch.int32)
+        x[0] = 10
+        set_value_based_on_backend(x, opts=par_opts(backend, {}))
+        if backend == parpy.CompileBackend.Cuda:
+            assert x[0] == 0
+        elif backend == parpy.CompileBackend.Metal:
+            assert x[0] == 1
+    run_if_backend_is_enabled(backend, helper)

@@ -69,7 +69,7 @@ impl CFType for Type {
     }
 }
 
-fn fold_expr(e: Expr) -> Expr {
+pub fn fold_expr(e: Expr) -> Expr {
     match e {
         Expr::UnOp {op, arg, ty, i} => {
             let arg = fold_expr(*arg);

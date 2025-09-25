@@ -640,13 +640,6 @@ fn type_check_unop(
         UnOp::Sub if ty.is_int_scalar() || ty.is_float_scalar() => Ok(ty.clone()),
         UnOp::Not if ty.is_bool_scalar() => Ok(ty.clone()),
         UnOp::BitNeg if ty.is_int_scalar() => Ok(ty.clone()),
-        UnOp::Exp if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Log if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Cos if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Sin if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Sqrt if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Tanh if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Abs if ty.is_int_scalar() || ty.is_float_scalar() => Ok(ty.clone()),
         _ => py_type_error!(i, "Unsupported argument type {ty} of unary operator {op:?}")
     }
 }
@@ -663,23 +656,16 @@ fn type_check_binop(
     let lhs = coerce_type(lhs, &ty)?;
     let rhs = coerce_type(rhs, &ty)?;
     let ty = match op {
-        BinOp::Add | BinOp::Sub | BinOp::Mul |
-        BinOp::Div if ty.is_int_scalar() || ty.is_float_scalar() => {
+        BinOp::Add | BinOp::Sub |
+        BinOp::Mul if ty.is_int_scalar() || ty.is_float_scalar() => {
             Ok(ty)
         },
-        BinOp::FloorDiv | BinOp::Rem if ty.is_int_scalar() => {
-            Ok(ty)
-        },
-        BinOp::Pow | BinOp::Atan2 if ty.is_float_scalar() => {
-            Ok(ty)
-        },
-        BinOp::And | BinOp::Or if ty.is_bool_scalar() => {
-            Ok(ty)
-        },
+        BinOp::Div if ty.is_float_scalar() => Ok(ty),
+        BinOp::FloorDiv | BinOp::Rem if ty.is_int_scalar() => Ok(ty),
+        BinOp::Pow if ty.is_float_scalar() => Ok(ty),
+        BinOp::And | BinOp::Or if ty.is_bool_scalar() => Ok(ty),
         BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor |
-        BinOp::BitShl | BinOp::BitShr if ty.is_int_scalar() => {
-            Ok(ty)
-        },
+        BinOp::BitShl | BinOp::BitShr if ty.is_int_scalar() => Ok(ty),
         BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq |
         BinOp::Lt | BinOp::Gt if ty.is_scalar() => {
             Ok(Type::fixed_scalar(ElemSize::Bool))
@@ -1046,14 +1032,14 @@ fn type_check_fun_def<'py>(
     env: TypeCheckEnv<'py>,
     def: FunDef,
     arg_types: Vec<Type>
-) -> TypeCheckResult<'py, FunDef> {
+) -> PyResult<(TypeCheckEnv<'py>, FunDef, bool)> {
     // 1. Produce environment for the function by unifying the parameter declarations with the
     //    types of the provided arguments.
     let (unify_env, params) = unify_parameter_types(def.params, arg_types, &def.id, &def.i)?;
 
     // If this particular function has already been specialized, we immediately return.
     match env.specs.get(&unify_env).cloned() {
-        Some(mono_def) => Ok((env, mono_def)),
+        Some(mono_def) => Ok((env, mono_def, false)),
         None => {
             let env = env.enter_function(params.clone());
 
@@ -1077,7 +1063,7 @@ fn type_check_fun_def<'py>(
             let def = FunDef {id, params, body, res_ty, ..def};
             let env = env.exit_function(unify_env, &def)?;
 
-            Ok((env, def))
+            Ok((env, def, true))
         }
     }
 }
@@ -1095,9 +1081,11 @@ fn type_check_top<'py>(
             Ok((env, t))
         },
         Top::FunDef {v} => {
-            let (mut env, v) = type_check_fun_def(env, v, arg_types)?;
+            let (mut env, v, new_spec) = type_check_fun_def(env, v, arg_types)?;
             let t = Top::FunDef {v};
-            env.spec_list.push(t.clone());
+            if new_spec {
+                env.spec_list.push(t.clone());
+            }
             Ok((env, t))
         },
     }
@@ -1108,7 +1096,7 @@ fn type_check_main<'py>(
     main: FunDef,
     arg_types: Vec<Type>
 ) -> PyResult<Ast> {
-    let (env, main) = type_check_fun_def(env, main, arg_types)?;
+    let (env, main, _) = type_check_fun_def(env, main, arg_types)?;
     let FunDef {ref res_ty, ref id, ref i, ..} = main;
     match res_ty {
         Type::Void => Ok(Ast {tops: env.spec_list, main}),

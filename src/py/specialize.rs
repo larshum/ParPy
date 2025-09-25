@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::constant_fold;
 use super::type_check;
 use crate::py_runtime_error;
 use crate::option::CompileOptions;
@@ -87,23 +88,22 @@ fn specialize_stmt<'a>(
 ) -> PyResult<Vec<Stmt>> {
     match s {
         Stmt::If {cond, thn, els, i} => {
-            match specialize_expr(env, cond.clone())? {
-                Expr::Bool {v, ..} => {
-                    if v {
-                        let mut thn = specialize_stmts(env, thn)?;
-                        acc.append(&mut thn);
-                    } else {
-                        let mut els = specialize_stmts(env, els)?;
-                        acc.append(&mut els);
-                    };
-                    Ok(acc)
-                },
-                cond => {
-                    let thn = specialize_stmts(env, thn)?;
-                    let els = specialize_stmts(env, els)?;
-                    acc.push(Stmt::If {cond, thn, els, i});
-                    Ok(acc)
-                }
+            let cond = specialize_expr(env, cond)?;
+            let cond = constant_fold::fold_expr(cond);
+            if let Expr::Bool {v, ..} = cond {
+                if v {
+                    let mut thn = specialize_stmts(env, thn)?;
+                    acc.append(&mut thn);
+                } else {
+                    let mut els = specialize_stmts(env, els)?;
+                    acc.append(&mut els);
+                };
+                Ok(acc)
+            } else {
+                let thn = specialize_stmts(env, thn)?;
+                let els = specialize_stmts(env, els)?;
+                acc.push(Stmt::If {cond, thn, els, i});
+                Ok(acc)
             }
         },
         // If the compiler reaches a static fail statement, it immediately produces a runtime error
