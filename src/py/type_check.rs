@@ -640,13 +640,6 @@ fn type_check_unop(
         UnOp::Sub if ty.is_int_scalar() || ty.is_float_scalar() => Ok(ty.clone()),
         UnOp::Not if ty.is_bool_scalar() => Ok(ty.clone()),
         UnOp::BitNeg if ty.is_int_scalar() => Ok(ty.clone()),
-        UnOp::Exp if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Log if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Cos if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Sin if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Sqrt if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Tanh if ty.is_float_scalar() => Ok(ty.clone()),
-        UnOp::Abs if ty.is_int_scalar() || ty.is_float_scalar() => Ok(ty.clone()),
         _ => py_type_error!(i, "Unsupported argument type {ty} of unary operator {op:?}")
     }
 }
@@ -669,7 +662,7 @@ fn type_check_binop(
         },
         BinOp::Div if ty.is_float_scalar() => Ok(ty),
         BinOp::FloorDiv | BinOp::Rem if ty.is_int_scalar() => Ok(ty),
-        BinOp::Pow | BinOp::Atan2 if ty.is_float_scalar() => Ok(ty),
+        BinOp::Pow if ty.is_float_scalar() => Ok(ty),
         BinOp::And | BinOp::Or if ty.is_bool_scalar() => Ok(ty),
         BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor |
         BinOp::BitShl | BinOp::BitShr if ty.is_int_scalar() => Ok(ty),

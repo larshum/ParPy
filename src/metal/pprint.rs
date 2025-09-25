@@ -57,8 +57,6 @@ impl PrettyPrintUnOp<Type> for Expr {
     fn is_function(op: &UnOp) -> bool {
         match op {
             UnOp::Sub | UnOp::Not | UnOp::BitNeg | UnOp::Addressof => false,
-            UnOp::Exp | UnOp::Log | UnOp::Cos | UnOp::Sin | UnOp::Sqrt |
-            UnOp::Tanh | UnOp::Abs => true,
         }
     }
 
@@ -68,13 +66,6 @@ impl PrettyPrintUnOp<Type> for Expr {
             UnOp::Not => "!",
             UnOp::BitNeg => "~",
             UnOp::Addressof => "&",
-            UnOp::Exp => "metal::exp",
-            UnOp::Log => "metal::log",
-            UnOp::Cos => "metal::cos",
-            UnOp::Sin => "metal::sin",
-            UnOp::Sqrt => "metal::sqrt",
-            UnOp::Tanh => "metal::tanh",
-            UnOp::Abs => "metal::abs",
         };
         Some(s.to_string())
     }
@@ -91,7 +82,7 @@ impl PrettyPrintBinOp<Type> for Expr {
 
     fn is_infix(op: &BinOp, _argty: &Type) -> bool {
         match op {
-            BinOp::Pow | BinOp::Max | BinOp::Min | BinOp::Atan2 => false,
+            BinOp::Pow | BinOp::Max | BinOp::Min => false,
             _ => true
         }
     }
@@ -119,7 +110,6 @@ impl PrettyPrintBinOp<Type> for Expr {
             BinOp::Gt => ">",
             BinOp::Max => "metal::max",
             BinOp::Min => "metal::min",
-            BinOp::Atan2 => "metal::atan2",
         };
         Some(s.to_string())
     }
@@ -489,11 +479,6 @@ mod test {
     #[test]
     fn sub_is_not_function() {
         assert!(!Expr::is_function(&UnOp::Sub));
-    }
-
-    #[test]
-    fn exp_is_function() {
-        assert!(Expr::is_function(&UnOp::Exp));
     }
 
     #[test]

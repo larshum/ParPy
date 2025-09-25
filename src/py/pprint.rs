@@ -65,8 +65,7 @@ impl PrettyPrintUnOp<Type> for Expr {
     fn is_function(op: &UnOp) -> bool {
         match op {
             UnOp::Sub | UnOp::Not | UnOp::BitNeg => false,
-            UnOp::Addressof | UnOp::Exp | UnOp::Log | UnOp::Cos | UnOp::Sin |
-            UnOp::Sqrt | UnOp::Tanh | UnOp::Abs => true,
+            UnOp::Addressof => true,
         }
     }
 
@@ -75,13 +74,6 @@ impl PrettyPrintUnOp<Type> for Expr {
             UnOp::Sub => "-",
             UnOp::Not => "!",
             UnOp::BitNeg => "~",
-            UnOp::Exp => "exp",
-            UnOp::Log => "log",
-            UnOp::Cos => "cos",
-            UnOp::Sin => "sin",
-            UnOp::Sqrt => "sqrt",
-            UnOp::Tanh => "tanh",
-            UnOp::Abs => "abs",
             UnOp::Addressof => "addressof"
         };
         Some(s.to_string())
@@ -110,7 +102,7 @@ impl PrettyPrintBinOp<Type> for Expr {
             BinOp::BitOr | BinOp::BitXor | BinOp::BitShl | BinOp::BitShr |
             BinOp::Eq | BinOp::Neq | BinOp::Leq | BinOp::Geq | BinOp::Lt |
             BinOp::Gt => true,
-            BinOp::Max | BinOp::Min | BinOp::Atan2 => false,
+            BinOp::Max | BinOp::Min => false,
         }
     }
 
@@ -138,7 +130,6 @@ impl PrettyPrintBinOp<Type> for Expr {
             BinOp::Gt => ">",
             BinOp::Max => "max",
             BinOp::Min => "min",
-            BinOp::Atan2 => "atan2"
         };
         Some(s.to_string())
     }
@@ -503,12 +494,6 @@ mod test {
     fn print_sub_unop() {
         let e = unop(UnOp::Sub, uint(1));
         assert_eq!(e.pprint_default(), "-1");
-    }
-
-    #[test]
-    fn print_log_unop() {
-        let e = unop(UnOp::Log, ufloat(1.5));
-        assert_eq!(e.pprint_default(), "log(1.5)");
     }
 
     #[test]

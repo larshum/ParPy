@@ -1,5 +1,5 @@
 from .main import external, jit
-from .operators import static_backend_eq, static_types_eq, static_fail
+from .builtin import static_backend_eq, static_types_eq, static_fail
 from .parpy import CompileBackend, Target
 from .types import *
 

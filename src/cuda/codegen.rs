@@ -21,26 +21,6 @@ fn from_gpu_ir_type(ty: gpu_ast::Type) -> Type {
     }
 }
 
-fn validate_unary_operation(
-    op: &UnOp, ty: &Type, i: &Info
-) -> CompileResult<()> {
-    match op {
-        UnOp::Tanh => match ty.get_scalar_elem_size() {
-            Some(ElemSize::F32 | ElemSize::F64) => Ok(()),
-            Some(ElemSize::F16) => {
-                parpy_type_error!(i, "Operation tanh not supported for \
-                                        16-bit floats.")
-            },
-            Some(_) | None => {
-                let ty = ty.pprint_default();
-                parpy_type_error!(i, "Unexpected type {ty} of tanh \
-                                        builtin (expected float).")
-            }
-        },
-        _ => Ok(())
-    }
-}
-
 fn validate_binary_operation(
     op: &BinOp, ty: &Type, i: &Info
 ) -> CompileResult<()> {
@@ -50,18 +30,6 @@ fn validate_binary_operation(
             Some(_) | None => {
                 let ty = ty.pprint_default();
                 parpy_type_error!(i, "Unsupported type {ty} of binary operator Pow.")
-            }
-        },
-        BinOp::Atan2 => match ty.get_scalar_elem_size() {
-            Some(ElemSize::F64) => Ok(()),
-            Some(ElemSize::F16 | ElemSize::F32) => {
-                parpy_type_error!(i, "Operation atan2 is only supported \
-                                      for 64-bit floats.")
-            },
-            Some(_) | None => {
-                let ty = ty.pprint_default();
-                parpy_type_error!(i, "Unexpected type {ty} of atan2 \
-                                      builtin (expected float).")
             }
         },
         _ => Ok(())
@@ -98,13 +66,7 @@ fn from_gpu_ir_expr(e: gpu_ast::Expr) -> CompileResult<Expr> {
         gpu_ast::Expr::Float {v, i, ..} => Ok(Expr::Float {v, ty, i}),
         gpu_ast::Expr::UnOp {op, arg, i, ..} => {
             let arg = from_gpu_ir_expr(*arg)?;
-            validate_unary_operation(&op, &ty, &i)?;
-            match (&op, &ty) {
-                (UnOp::Abs, Type::Scalar {sz}) if sz.is_unsigned_integer() => {
-                    Ok(arg)
-                },
-                _ => Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
-            }
+            Ok(Expr::UnOp {op, arg: Box::new(arg), ty, i})
         },
         gpu_ast::Expr::BinOp {lhs, op, rhs, i, ..} => {
             let lhs = from_gpu_ir_expr(*lhs)?;
@@ -400,25 +362,6 @@ mod test {
     use crate::cuda::ast_builder::*;
     use crate::gpu::ast_builder as gpu;
     use crate::option::CompileOptions;
-    use crate::test::*;
-
-    #[test]
-    fn tanh_f16_invalid() {
-        let r = validate_unary_operation(&UnOp::Tanh, &scalar(ElemSize::F16), &i());
-        assert_error_matches(r, "tanh not supported for 16-bit float.*");
-    }
-
-    #[test]
-    fn tanh_invalid_scalar_type() {
-        let r = validate_unary_operation(&UnOp::Tanh, &scalar(ElemSize::I32), &i());
-        assert_error_matches(r, "Unexpected type");
-    }
-
-    #[test]
-    fn atan2_f32_invalid() {
-        let r = validate_binary_operation(&BinOp::Atan2, &scalar(ElemSize::F32), &i());
-        assert_error_matches(r, "Operation.*only supported for 64-bit");
-    }
 
     #[test]
     fn scalar_type_contains_16bit_float_fails() {

@@ -157,12 +157,6 @@ mod test {
     }
 
     #[test]
-    fn exp_sub() {
-        let e = unop(UnOp::Exp, binop(float(2.5, None), BinOp::Sub, float(2.5, None), None));
-        assert_eq!(cf(&e), float(1.0, None));
-    }
-
-    #[test]
     fn int_equality() {
         let e = binop(int(2, None), BinOp::Eq, int(3, None), Some(bool_ty()));
         assert_eq!(cf(&e), bool_expr(false));
@@ -177,12 +171,6 @@ mod test {
     #[test]
     fn div_by_zero_untouched() {
         let e = binop(int(3, None), BinOp::Div, int(0, None), None);
-        assert_eq!(cf(&e), e);
-    }
-
-    #[test]
-    fn log_zero_untouched() {
-        let e = unop(UnOp::Log, float(0.0, None));
         assert_eq!(cf(&e), e);
     }
 

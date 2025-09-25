@@ -51,7 +51,6 @@ fn apply_int_unop<T, E: CFExpr<T>>(
     let v = arg.get_int_value().unwrap();
     let o = match op {
         UnOp::Sub => Some(-v),
-        UnOp::Abs => Some(v.abs()),
         UnOp::BitNeg => Some(!v),
         _ => None
     };
@@ -70,13 +69,6 @@ fn apply_float_unop<T, E: CFExpr<T>>(
     let v = arg.get_float_value().unwrap();
     let o = match op {
         UnOp::Sub => Some(-v),
-        UnOp::Exp => Some(v.exp()),
-        UnOp::Log if v > 0.0 => Some(v.ln()),
-        UnOp::Abs => Some(v.abs()),
-        UnOp::Cos => Some(v.cos()),
-        UnOp::Sin => Some(v.sin()),
-        UnOp::Sqrt => Some(v.sqrt()),
-        UnOp::Tanh => Some(v.tanh()),
         _ => None
     };
     match o {
@@ -309,10 +301,6 @@ mod test {
         apply_int_unop(op, e, scalar(sz), Info::default())
     }
 
-    fn apply_float_unop_h(op: UnOp, e: Expr, sz: ElemSize) -> Expr {
-        apply_float_unop(op, e, scalar(sz), Info::default())
-    }
-
     fn apply_bool_binop_h(l: Expr, op: BinOp, r: Expr) -> Expr {
         apply_bool_binop(l, op, r, scalar(ElemSize::Bool), Info::default())
     }
@@ -342,50 +330,10 @@ mod test {
     }
 
     #[test]
-    fn apply_int_unop_abs() {
-        assert_eq!(
-            apply_int_unop_h(UnOp::Abs, int_lit(-1), ElemSize::I64),
-            int_lit(1)
-        );
-    }
-
-    #[test]
     fn apply_int_unop_bitneg() {
         assert_eq!(
             apply_int_unop_h(UnOp::BitNeg, int_lit(1), ElemSize::I64),
             int_lit(-2)
-        );
-    }
-
-    #[test]
-    fn apply_float_unop_exp() {
-        assert_eq!(
-            apply_float_unop_h(UnOp::Exp, float_lit(1.0), ElemSize::F32),
-            float_lit(std::f64::consts::E)
-        );
-    }
-
-    #[test]
-    fn apply_float_unop_cos() {
-        assert_eq!(
-            apply_float_unop_h(UnOp::Cos, float_lit(0.0), ElemSize::F32),
-            float_lit(1.0)
-        );
-    }
-
-    #[test]
-    fn apply_float_unop_sin() {
-        assert_eq!(
-            apply_float_unop_h(UnOp::Sin, float_lit(0.0), ElemSize::F32),
-            float_lit(0.0)
-        );
-    }
-
-    #[test]
-    fn apply_float_unop_abs() {
-        assert_eq!(
-            apply_float_unop_h(UnOp::Abs, float_lit(-1.5), ElemSize::F32),
-            float_lit(1.5)
         );
     }
 

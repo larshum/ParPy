@@ -111,7 +111,7 @@ impl ScalarSizes {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
 pub enum UnOp {
-    #[default] Sub, Not, BitNeg, Addressof, Exp, Log, Cos, Sin, Sqrt, Tanh, Abs
+    #[default] Sub, Not, BitNeg, Addressof
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord, EnumIter)]
@@ -119,7 +119,7 @@ pub enum BinOp {
     #[default] Add, Sub, Mul, FloorDiv, Div, Rem, Pow, And, Or,
     BitAnd, BitOr, BitXor, BitShl, BitShr,
     Eq, Neq, Leq, Geq, Lt, Gt,
-    Max, Min, Atan2
+    Max, Min
 }
 
 impl BinOp {
@@ -135,7 +135,7 @@ impl BinOp {
             BinOp::BitShl | BinOp::BitShr => 10,
             BinOp::Add | BinOp::Sub => 11,
             BinOp::Mul | BinOp::FloorDiv | BinOp::Div | BinOp::Rem => 12,
-            BinOp::Pow | BinOp::Max | BinOp::Min | BinOp::Atan2 => 20
+            BinOp::Pow | BinOp::Max | BinOp::Min => 20
         }
     }
 

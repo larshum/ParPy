@@ -22,18 +22,6 @@ pub fn int(v: i64, sz: ElemSize) -> Expr {
     Expr::Int {v: v as i128, ty: scalar(sz), i: Info::default()}
 }
 
-pub fn unop(op: UnOp, arg: Expr, ty: Type) -> Expr {
-    Expr::UnOp {op, arg: Box::new(arg), ty, i: Info::default()}
-}
-
-pub fn exp(arg: Expr, ty: Type) -> Expr {
-    unop(UnOp::Exp, arg, ty)
-}
-
-pub fn log(arg: Expr, ty: Type) -> Expr {
-    unop(UnOp::Log, arg, ty)
-}
-
 pub fn binop(lhs: Expr, op: BinOp, rhs: Expr, ty: Type) -> Expr {
     Expr::BinOp {lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i: Info::default()}
 }
