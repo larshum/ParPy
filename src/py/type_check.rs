@@ -1039,14 +1039,14 @@ fn type_check_fun_def<'py>(
     env: TypeCheckEnv<'py>,
     def: FunDef,
     arg_types: Vec<Type>
-) -> TypeCheckResult<'py, FunDef> {
+) -> PyResult<(TypeCheckEnv<'py>, FunDef, bool)> {
     // 1. Produce environment for the function by unifying the parameter declarations with the
     //    types of the provided arguments.
     let (unify_env, params) = unify_parameter_types(def.params, arg_types, &def.id, &def.i)?;
 
     // If this particular function has already been specialized, we immediately return.
     match env.specs.get(&unify_env).cloned() {
-        Some(mono_def) => Ok((env, mono_def)),
+        Some(mono_def) => Ok((env, mono_def, false)),
         None => {
             let env = env.enter_function(params.clone());
 
@@ -1070,7 +1070,7 @@ fn type_check_fun_def<'py>(
             let def = FunDef {id, params, body, res_ty, ..def};
             let env = env.exit_function(unify_env, &def)?;
 
-            Ok((env, def))
+            Ok((env, def, true))
         }
     }
 }
@@ -1088,9 +1088,11 @@ fn type_check_top<'py>(
             Ok((env, t))
         },
         Top::FunDef {v} => {
-            let (mut env, v) = type_check_fun_def(env, v, arg_types)?;
+            let (mut env, v, new_spec) = type_check_fun_def(env, v, arg_types)?;
             let t = Top::FunDef {v};
-            env.spec_list.push(t.clone());
+            if new_spec {
+                env.spec_list.push(t.clone());
+            }
             Ok((env, t))
         },
     }
@@ -1101,7 +1103,7 @@ fn type_check_main<'py>(
     main: FunDef,
     arg_types: Vec<Type>
 ) -> PyResult<Ast> {
-    let (env, main) = type_check_fun_def(env, main, arg_types)?;
+    let (env, main, _) = type_check_fun_def(env, main, arg_types)?;
     let FunDef {ref res_ty, ref id, ref i, ..} = main;
     match res_ty {
         Type::Void => Ok(Ast {tops: env.spec_list, main}),
