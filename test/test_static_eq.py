@@ -57,8 +57,9 @@ def parpy_type_set_value(x: parpy.types.buffer(sz, [N])):
             x[0] = 8.0
         elif parpy.builtin.static_types_eq(sz, parpy.types.F32):
             x[0] = 9.0
-        elif parpy.builtin.static_types_eq(sz, parpy.types.F64):
-            x[0] = 10.0
+        elif parpy.builtin.static_backend_eq(parpy.CompileBackend.Cuda) and \
+            parpy.builtin.static_types_eq(sz, parpy.types.F64):
+                x[0] = 10.0
         else:
             parpy.builtin.static_fail("Function not supported for type")
 
@@ -82,7 +83,27 @@ cases = [
 def test_type_set_value(backend, test_case):
     def helper():
         sz, expected = test_case
-        x = parpy.buffer.zeros((1,), sz, backend)
-        parpy_type_set_value(x, opts=par_opts(backend, {}))
-        assert x.numpy()[0] == expected
+        x = np.zeros((1,), sz.to_numpy())
+        opts = par_opts(backend, {})
+        if backend == parpy.CompileBackend.Metal and sz == parpy.types.F64:
+            with pytest.raises(RuntimeError) as e_info:
+                parpy_type_set_value(x, opts=opts)
+            assert e_info.match("Function not supported for type")
+        else:
+            parpy_type_set_value(x, opts=opts)
+            assert x[0] == expected
     run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+@pytest.mark.parametrize('test_case', cases)
+def test_type_set_value_compiles(backend, test_case):
+    sz, _ = test_case
+    x = np.zeros((1,), sz.to_numpy())
+    opts = par_opts(backend, {})
+    if backend == parpy.CompileBackend.Metal and sz == parpy.types.F64:
+        with pytest.raises(RuntimeError) as e_info:
+            parpy.print_compiled(parpy_type_set_value, [x], opts)
+        assert e_info.match("Function not supported for type")
+    else:
+        code = parpy.print_compiled(parpy_type_set_value, [x], opts)
+        assert len(code) != 0
