@@ -9,12 +9,12 @@ np.random.seed(1234)
 @parpy.jit
 def parpy_backend_set_value(x):
     with parpy.gpu:
-        if parpy.operators.static_backend_eq(parpy.CompileBackend.Cuda):
+        if parpy.builtin.static_backend_eq(parpy.CompileBackend.Cuda):
             x[0] = 0
-        elif parpy.operators.static_backend_eq(parpy.CompileBackend.Metal):
+        elif parpy.builtin.static_backend_eq(parpy.CompileBackend.Metal):
             x[0] = 1
         else:
-            parpy.operators.static_fail("Function only supports CUDA and Metal")
+            parpy.builtin.static_fail("Function only supports CUDA and Metal")
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_backend_set_value(backend):
@@ -35,32 +35,32 @@ N = parpy.types.symbol()
 @parpy.jit
 def parpy_type_set_value(x: parpy.types.buffer(sz, [N])):
     with parpy.gpu:
-        if parpy.operators.static_types_eq(sz, parpy.types.Bool):
+        if parpy.builtin.static_types_eq(sz, parpy.types.Bool):
             x[0] = False
-        elif parpy.operators.static_types_eq(sz, parpy.types.I8):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.I8):
             x[0] = 0
-        elif parpy.operators.static_types_eq(sz, parpy.types.I16):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.I16):
             x[0] = 1
-        elif parpy.operators.static_types_eq(sz, parpy.types.I32):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.I32):
             x[0] = 2
-        elif parpy.operators.static_types_eq(sz, parpy.types.I64):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.I64):
             x[0] = 3
-        elif parpy.operators.static_types_eq(sz, parpy.types.U8):
-            x[0] = parpy.operators.convert(4, sz)
-        elif parpy.operators.static_types_eq(sz, parpy.types.U16):
-            x[0] = parpy.operators.convert(5, sz)
-        elif parpy.operators.static_types_eq(sz, parpy.types.U32):
-            x[0] = parpy.operators.convert(6, sz)
-        elif parpy.operators.static_types_eq(sz, parpy.types.U64):
-            x[0] = parpy.operators.convert(7, sz)
-        elif parpy.operators.static_types_eq(sz, parpy.types.F16):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.U8):
+            x[0] = parpy.builtin.convert(4, sz)
+        elif parpy.builtin.static_types_eq(sz, parpy.types.U16):
+            x[0] = parpy.builtin.convert(5, sz)
+        elif parpy.builtin.static_types_eq(sz, parpy.types.U32):
+            x[0] = parpy.builtin.convert(6, sz)
+        elif parpy.builtin.static_types_eq(sz, parpy.types.U64):
+            x[0] = parpy.builtin.convert(7, sz)
+        elif parpy.builtin.static_types_eq(sz, parpy.types.F16):
             x[0] = 8.0
-        elif parpy.operators.static_types_eq(sz, parpy.types.F32):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.F32):
             x[0] = 9.0
-        elif parpy.operators.static_types_eq(sz, parpy.types.F64):
+        elif parpy.builtin.static_types_eq(sz, parpy.types.F64):
             x[0] = 10.0
         else:
-            parpy.operators.static_fail("Function not supported for type")
+            parpy.builtin.static_fail("Function not supported for type")
 
 cases = [
     (parpy.types.Bool, False),

@@ -87,7 +87,7 @@ def test_return_in_main_function():
         @parpy.jit
         def f_return(x):
             with parpy.gpu:
-                y = parpy.operators.sum(x[:])
+                y = parpy.builtin.sum(x[:])
                 return y
         backend = enabled_backends[0]
         with pytest.raises(TypeError) as e_info:
@@ -125,7 +125,7 @@ def test_unbound_type_variable(backend):
     @parpy.jit
     def unbound_type_var_conversion(x: parpy.types.buffer(ty1, [N])):
         with parpy.gpu:
-            x[0] = parpy.operators.convert(1.0, ty2)
+            x[0] = parpy.builtin.convert(1.0, ty2)
 
     x = np.ndarray((1,), np.float32)
     opts = par_opts(backend, {})

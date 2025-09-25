@@ -11,7 +11,7 @@ def sum_rows(x, N, out):
     parpy.label('N')
     for i in range(N):
         parpy.label('M')
-        out[i] = parpy.operators.sum(x[i,:])
+        out[i] = parpy.builtin.sum(x[i,:])
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_reduce_multi_block(backend):
@@ -37,7 +37,7 @@ def normalize(x, N):
     parpy.label('N')
     for i in range(N):
         parpy.label('M_1')
-        s = parpy.operators.sum(x[i,:])
+        s = parpy.builtin.sum(x[i,:])
         parpy.label('M_2')
         x[i,:] /= s
 
@@ -62,11 +62,11 @@ def sum_exp_3d(x, N, M, out):
         parpy.label('M')
         for j in range(M):
             parpy.label('K_1')
-            x[i,j,:] = parpy.operators.exp(x[i,j,:])
+            x[i,j,:] = parpy.math.exp(x[i,j,:])
         parpy.label('M')
         for j in range(M):
             parpy.label('K_2')
-            out[i,j] = parpy.operators.sum(x[i,j,:])
+            out[i,j] = parpy.builtin.sum(x[i,j,:])
 
 def sum_exp_3d_wrap(backend, par):
     N, M, K = 10, 20, 30
@@ -74,9 +74,8 @@ def sum_exp_3d_wrap(backend, par):
     x_2 = np.copy(x)
     out = np.zeros((N, M), dtype=x.dtype)
     parpy.jit(sum_exp_3d)(x, N, M, out, opts=par_opts(backend, par))
-    ref_out = np.zeros_like(out)
-    sum_exp_3d(x_2, N, M, ref_out)
-    assert np.allclose(out, ref_out, atol=1e-5)
+    expected = np.sum(np.exp(x_2), axis=2)
+    assert np.allclose(out, expected, atol=1e-5)
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_nested_imbalanced_parallelism(backend):
