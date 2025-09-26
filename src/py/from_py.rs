@@ -541,14 +541,8 @@ fn construct_expr_stmt(
     i: &Info
 ) -> PyResult<Stmt> {
     match value {
-        Expr::Label {label, ..} => {
-            Ok(Stmt::Label {label, i: i.clone()})
-        },
-        Expr::StaticFail {msg, ..} => {
-            Ok(Stmt::StaticFail {msg, i: i.clone()})
-        },
-        Expr::Call {id, args, ..} => {
-            Ok(Stmt::Call {func: id, args, i: i.clone()})
+        Expr::Label {..} | Expr::StaticFail {..} | Expr::Call {..} => {
+            Ok(Stmt::Expr {e: value, i: i.clone()})
         },
         _ => py_runtime_error!(i, "Unsupported expression statement")
     }

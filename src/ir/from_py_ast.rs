@@ -371,15 +371,9 @@ fn to_ir_stmt(
             let par = LoopPar::default().threads(1).unwrap();
             Ok(Stmt::For {var, lo, hi, step: 1, body, par, i})
         },
-        py_ast::Stmt::Call {i, ..} => {
-            parpy_internal_error!(i, "Found Call statement node in IR translation")
+        py_ast::Stmt::Expr {i, ..} => {
+            parpy_internal_error!(i, "Found Expr statement node in IR translation")
         },
-        py_ast::Stmt::Label {i, ..} => {
-            parpy_internal_error!(i, "Found Label statement node in IR translation")
-        },
-        py_ast::Stmt::StaticFail {i, ..} => {
-            parpy_internal_error!(i, "Found StaticFail statement node in IR translation")
-        }
     }
 }
 

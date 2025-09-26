@@ -71,16 +71,8 @@ fn replace_names_expr(env: &ElimDupEnv, e: Expr) -> Expr {
 }
 
 fn replace_names_stmt(env: &ElimDupEnv, s: Stmt) -> Stmt {
-    match s {
-        Stmt::Call {func, args, i} => {
-            let func = lookup_name(env, func);
-            Stmt::Call {func, args, i}
-        },
-        _ => {
-            s.smap(|s| replace_names_stmt(env, s))
-                .smap(|e| replace_names_expr(env, e))
-        }
-    }
+    s.smap(|s| replace_names_stmt(env, s))
+        .smap(|e| replace_names_expr(env, e))
 }
 
 fn replace_names_fun_def(env: &ElimDupEnv, def: FunDef) -> FunDef {

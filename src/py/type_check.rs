@@ -867,12 +867,8 @@ impl TypeCheck for Expr {
             },
             Expr::Call {id, args, ty: _, i} => {
                 let (env, args) = args.type_check(env)?;
-                let (env, new_id, ret_ty, args) = type_check_call(env, &id, args, &i)?;
-                match ret_ty {
-                    Type::Void => py_type_error!(i, "Function call expression cannot \
-                                                     have void result."),
-                    ty => Ok((env, Expr::Call {id: new_id, args, ty, i}))
-                }
+                let (env, new_id, ty, args) = type_check_call(env, &id, args, &i)?;
+                Ok((env, Expr::Call {id: new_id, args, ty, i}))
             },
             Expr::Convert {e, ty, i} => {
                 let (env, e) = e.type_check(env)?;
@@ -943,17 +939,14 @@ impl TypeCheck for Stmt {
                 let (env, body) = body.type_check(env)?;
                 Ok((env, Stmt::WithGpuContext {body, i}))
             },
-            Stmt::Call {func, args, i} => {
-                let (env, args) = args.type_check(env)?;
-                let (env, new_id, ret_ty, args) = type_check_call(env, &func, args, &i)?;
-                match ret_ty {
-                    Type::Void => Ok((env, Stmt::Call {func: new_id, args, i})),
-                    ty => py_type_error!(i, "Function call statement must have \
-                                             void result, but found {ty}.")
+            Stmt::Expr {e, i} => {
+                let (env, e) = e.type_check(env)?;
+                match e.get_type() {
+                    Type::Void => Ok((env, Stmt::Expr {e, i})),
+                    ty => py_type_error!(i, "Expression statement cannot produce \
+                                             a result (found result type {ty})")
                 }
             },
-            Stmt::Label {label, i} => Ok((env, Stmt::Label {label, i})),
-            Stmt::StaticFail {msg, i} => Ok((env, Stmt::StaticFail {msg, i})),
         }
     }
 }

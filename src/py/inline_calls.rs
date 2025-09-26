@@ -61,8 +61,8 @@ fn inline_function_calls_stmt<'py>(
     tops: &BTreeMap<String, Bound<'py, PyCapsule>>
 ) -> PyResult<Vec<Stmt>> {
     match stmt {
-        Stmt::Call {func, args, i} => {
-            if let Some(ast_ref) = tops.get(func.get_str()) {
+        Stmt::Expr {e: Expr::Call {id, args, ..}, i} => {
+            if let Some(ast_ref) = tops.get(id.get_str()) {
                 let t: Top = unsafe { ast_ref.reference::<Top>() }.clone();
                 match t {
                     Top::FunDef {v: fun} => {
@@ -75,7 +75,7 @@ fn inline_function_calls_stmt<'py>(
                     },
                 }
             } else {
-                py_runtime_error!(i, "Reference to unknown function {func}.")?
+                py_runtime_error!(i, "Reference to unknown function {id}.")?
             }
         },
         Stmt::For {var, lo, hi, step, body, labels, i} => {
@@ -96,7 +96,7 @@ fn inline_function_calls_stmt<'py>(
             acc.push(Stmt::WithGpuContext {body, i});
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::Label {..} | Stmt::StaticFail {..} => {
+        Stmt::Expr {..} => {
             acc.push(stmt);
         }
     };

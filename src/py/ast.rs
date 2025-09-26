@@ -451,9 +451,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>, i: Info},
     Return {value: Expr, i: Info},
     WithGpuContext {body: Vec<Stmt>, i: Info},
-    Call {func: Name, args: Vec<Expr>, i: Info},
-    Label {label: String, i: Info},
-    StaticFail {msg: String, i: Info},
+    Expr {e: Expr, i: Info},
 }
 
 impl InfoNode for Stmt {
@@ -466,9 +464,7 @@ impl InfoNode for Stmt {
             Stmt::If {i, ..} => i.clone(),
             Stmt::Return {i, ..} => i.clone(),
             Stmt::WithGpuContext {i, ..} => i.clone(),
-            Stmt::Call {i, ..} => i.clone(),
-            Stmt::Label {i, ..} => i.clone(),
-            Stmt::StaticFail {i, ..} => i.clone(),
+            Stmt::Expr {i, ..} => i.clone(),
         }
     }
 }
@@ -506,12 +502,13 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value, i}))
             },
-            Stmt::Call {func, args, i} => {
-                let (acc, args) = args.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Stmt::Call {func, args, i}))
+            Stmt::Expr {e, i} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e, i}))
             },
-            Stmt::WithGpuContext {..} | Stmt::Label {..} | Stmt::StaticFail {..} =>
-                Ok((acc?, self)),
+            Stmt::WithGpuContext {..} => {
+                Ok((acc?, self))
+            },
         }
     }
 }
@@ -529,8 +526,8 @@ impl SFold<Expr> for Stmt {
             Stmt::While {cond, ..} => f(acc?, cond),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::Return {value, ..} => f(acc?, value),
-            Stmt::Call {args, ..} => args.sfold_result(acc, &f),
-            Stmt::WithGpuContext {..} | Stmt::Label {..} | Stmt::StaticFail {..} => acc,
+            Stmt::Expr {e, ..} => f(acc?, e),
+            Stmt::WithGpuContext {..} => acc,
         }
     }
 }
@@ -560,7 +557,7 @@ impl SMapAccum<Stmt> for Stmt {
                 Ok((acc, Stmt::WithGpuContext {body, i}))
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Label {..} | Stmt::Call {..} | Stmt::StaticFail {..} => {
+            Stmt::Expr {..} => {
                 Ok((acc?, self))
             }
         }
@@ -579,7 +576,7 @@ impl SFold<Stmt> for Stmt {
             Stmt::If {thn, els, ..} => els.sfold_result(thn.sfold_result(acc, &f), &f),
             Stmt::WithGpuContext {body, ..} => body.sfold_result(acc, &f),
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Label {..} | Stmt::Call {..} | Stmt::StaticFail {..} => acc
+            Stmt::Expr {..} => acc
         }
     }
 }
@@ -609,7 +606,7 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::WithGpuContext {body, i});
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Call {..} | Stmt::Label {..} | Stmt::StaticFail {..} => {
+            Stmt::Expr {..} => {
                 acc.push(self);
             },
         };

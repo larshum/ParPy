@@ -19,11 +19,11 @@ fn ensure_parallelism_stmt(
     match s {
         Stmt::Definition {labels, ..} | Stmt::Assign {labels, ..} |
         Stmt::For {labels, ..} if labels.iter().any(|l| par.contains_key(l)) => true,
-        Stmt::Label {label, ..} if par.contains_key(label) => true,
+        Stmt::Expr {e: Expr::Label {label, ..}, ..} if par.contains_key(label) => true,
         Stmt::WithGpuContext {..} => true,
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::For {..} |
-        Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} | Stmt::Label {..} |
-        Stmt::Call {..} | Stmt::StaticFail {..} => {
+        Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
+        Stmt::Expr {..} => {
             s.sfold(acc, |acc, s| ensure_parallelism_stmt(acc, s, par))
         }
     }

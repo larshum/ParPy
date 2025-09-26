@@ -31,8 +31,7 @@ fn add_labels_stmt(
             Ok(Stmt::For {var, lo, hi, step, body, labels, i})
         },
         Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} |
-        Stmt::WithGpuContext {..} | Stmt::Call {..} | Stmt::Label {..} |
-        Stmt::StaticFail {..} => {
+        Stmt::WithGpuContext {..} | Stmt::Expr {..} => {
             py_runtime_error!(
                 stmt.get_info(),
                 "Cannot associate label with non-parallelizable statement"
@@ -46,7 +45,7 @@ fn associate_labels_stmt(
     s: Stmt
 ) -> PyResult<(Vec<Stmt>, Vec<String>)> {
     let (mut stmts, mut labels) = acc?;
-    if let Stmt::Label {label, ..} = s {
+    if let Stmt::Expr {e: Expr::Label {label, ..}, ..} = s {
         labels.push(label);
         Ok((stmts, labels))
     } else {
@@ -74,7 +73,7 @@ fn associate_labels_stmt(
                 Stmt::WithGpuContext {body, i}
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Call {..} | Stmt::Label {..} | Stmt::StaticFail {..} => s
+            Stmt::Expr {..} => s
         };
         stmts.push(s);
         Ok((stmts, vec![]))
@@ -102,6 +101,7 @@ pub fn associate_labels(fun: FunDef) -> PyResult<FunDef> {
 mod test {
     use super::*;
     use crate::test::*;
+    use crate::py::ast_builder::*;
     use crate::utils::name::Name;
 
     fn int(v: i64) -> Expr {
@@ -112,7 +112,7 @@ mod test {
     fn assoc_for_loop() {
         let x = Name::sym_str("x");
         let body = vec![
-            Stmt::Label {label: "x".to_string(), i: i()},
+            label("x"),
             Stmt::For {
                 var: x.clone(), lo: int(1), hi: int(7), step: 2, body: vec![],
                 labels: vec![], i: i()
@@ -136,7 +136,7 @@ mod test {
         let body = vec![
             Stmt::For {
                 var: x.clone(), lo: int(1), hi: int(7), step: 1, body: vec![
-                    Stmt::Label {label: "i".to_string(), i: i()},
+                    label("i"),
                     inner_for(vec![])
                 ],
                 labels: vec![], i: i()
