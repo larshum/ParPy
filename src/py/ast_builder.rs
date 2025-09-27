@@ -1,3 +1,4 @@
+use crate::test::*;
 use crate::py::ast::*;
 use crate::utils::ast::ExprType;
 use crate::utils::info::*;
@@ -113,7 +114,7 @@ pub fn if_stmt(cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>) -> Stmt {
 }
 
 pub fn label(l: &str) -> Stmt {
-    Stmt::Label {label: l.to_string(), i: Info::default()}
+    Stmt::Expr {e: Expr::Label {label: l.to_string(), ty: tyuk(), i: i()}, i: i()}
 }
 
 pub fn return_stmt(value: Expr) -> Stmt {

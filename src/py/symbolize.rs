@@ -124,7 +124,7 @@ impl Symbolize for Expr {
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
             Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
             Expr::Slice {..} | Expr::Tuple {..} | Expr::GpuContext {..} |
-            Expr::Label {..} | Expr::StaticBackendEq {..} |
+            Expr::Inline {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
             Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
@@ -164,14 +164,12 @@ impl Symbolize for Stmt {
                 let (_, body) = body.symbolize(body_env)?;
                 Ok((env, Stmt::For {var, lo, hi, step, body, labels, i}))
             },
-            Stmt::Call {func, args, i} => {
-                let func = env.get_symbol(func)?;
-                let (env, args) = args.symbolize(env)?;
-                Ok((env, Stmt::Call {func, args, i}))
+            Stmt::Expr {e, i} => {
+                let (env, e) = e.symbolize(env)?;
+                Ok((env, Stmt::Expr {e, i}))
             },
             Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-            Stmt::WithGpuContext {..} | Stmt::Label {..} |
-            Stmt::StaticFail {..} => {
+            Stmt::WithGpuContext {..} => {
                 let (env, s) = self.smap_accum_l_result(Ok(env), |env, e: Expr| e.symbolize(env))?;
                 s.smap_accum_l_result(Ok(env), |env, s: Stmt| s.symbolize(env))
             }

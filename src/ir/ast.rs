@@ -185,6 +185,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>, i: Info},
     While {cond: Expr, body: Vec<Stmt>, i: Info},
     Return {value: Expr, i: Info},
+    Expr {e: Expr, i: Info},
     Alloc {id: Name, elem_ty: Type, sz: usize, i: Info},
     Free {id: Name, i: Info},
 }
@@ -198,6 +199,7 @@ impl InfoNode for Stmt {
             Stmt::For {i, ..} => i.clone(),
             Stmt::If {i, ..} => i.clone(),
             Stmt::While {i, ..} => i.clone(),
+            Stmt::Expr {i, ..} => i.clone(),
             Stmt::Return {i, ..} => i.clone(),
             Stmt::Alloc {i, ..} => i.clone(),
             Stmt::Free {i, ..} => i.clone()
@@ -234,6 +236,10 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, cond) = f(acc?, cond)?;
                 Ok((acc, Stmt::While {cond, body, i}))
             },
+            Stmt::Expr {e, i} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e, i}))
+            },
             Stmt::Return {value, i} => {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value, i}))
@@ -257,6 +263,7 @@ impl SFold<Expr> for Stmt {
             Stmt::For {lo, hi, ..} => f(f(acc?, lo)?, hi),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::While {cond, ..} => f(acc?, cond),
+            Stmt::Expr {e, ..} => f(acc?, e),
             Stmt::Return {value, ..} => f(acc?, value),
             Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => acc
         }
@@ -283,8 +290,9 @@ impl SMapAccum<Stmt> for Stmt {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::While {cond, body, i}))
             },
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
+            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Expr {..} |
+            Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
+            Stmt::Free {..} => {
                 Ok((acc?, self))
             }
         }
@@ -301,8 +309,9 @@ impl SFold<Stmt> for Stmt {
             Stmt::For {body, ..} => body.sfold_result(acc, &f),
             Stmt::While {body, ..} => body.sfold_result(acc, &f),
             Stmt::If {thn, els, ..} => els.sfold_result(thn.sfold_result(acc, &f), &f),
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => acc
+            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Expr {..} |
+            Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
+            Stmt::Free {..} => acc
         }
     }
 }
@@ -328,7 +337,8 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::While {cond, body, i});
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-            Stmt::Return {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
+            Stmt::Expr {..} | Stmt::Return {..} | Stmt::Alloc {..} |
+            Stmt::Free {..} => {
                 acc.push(self);
             },
         };

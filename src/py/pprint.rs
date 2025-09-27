@@ -212,6 +212,10 @@ impl PrettyPrint for Expr {
                 (env, format!("{ty}({e})"))
             },
             Expr::GpuContext {..} => (env, format!("<gpu_context>")),
+            Expr::Inline {e, ..} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("<inline({e})>"))
+            },
             Expr::Label {label, ..} => (env, format!("<label({label})>")),
             Expr::StaticBackendEq {backend, ..} => {
                 (env, format!("<static_backend_eq({backend:?})>"))
@@ -282,15 +286,9 @@ impl PrettyPrint for Stmt {
                 let env = env.decr_indent();
                 (env, format!("{indent}with parpy.gpu:\n{body}"))
             },
-            Stmt::Call {func, args, ..} => {
-                let (env, args) = pprint_iter(args.iter(), env, ", ");
-                (env, format!("{indent}{func}({args})"))
-            },
-            Stmt::Label {label, ..} => {
-                (env, format!("{indent}parpy.label(\"{label}\")"))
-            },
-            Stmt::StaticFail {msg, ..} => {
-                (env, format!("{indent}parpy.static_fail(\"{msg}\")"))
+            Stmt::Expr {e, ..} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}{e}"))
             },
         }
     }

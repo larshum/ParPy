@@ -17,8 +17,10 @@ use std::collections::{BTreeMap, BTreeSet};
 fn insert_synchronization_points_stmt(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
     match s {
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-        Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} | Stmt::Alloc {..} |
-        Stmt::Free {..} => s.sflatten(acc, insert_synchronization_points_stmt),
+        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
+        Stmt::Alloc {..} | Stmt::Free {..} => {
+            s.sflatten(acc, insert_synchronization_points_stmt)
+        },
         Stmt::For {var, lo, hi, step, body, par, i} => {
             let is_par = par.is_parallel();
             let body = insert_synchronization_points(body);
@@ -65,8 +67,8 @@ fn classify_synchronization_points_par_stmt(
 ) -> Vec<Stmt> {
     match s {
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::If {..} |
-        Stmt::While {..} | Stmt::Return {..} | Stmt::Alloc {..} |
-        Stmt::Free {..} => {
+        Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
+        Stmt::Alloc {..} | Stmt::Free {..} => {
             s.sflatten(acc, |acc, s| {
                 classify_synchronization_points_par_stmt(node, opts, acc, s)
             })
@@ -121,7 +123,7 @@ fn classify_synchronization_points_stmt(
             Stmt::For {var, lo, hi, step, body, par, i}
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::SyncPoint {..} | Stmt::While {..} | Stmt::If {..} |
+        Stmt::SyncPoint {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::If {..} |
         Stmt::Alloc {..} | Stmt::Free {..} => {
             s.smap(|s| classify_synchronization_points_stmt(t, opts, s))
         }
@@ -570,8 +572,9 @@ fn hoist_inner_seq_loops_par_stmt(
 ) -> CompileResult<Vec<Stmt>> {
     let mut acc = acc?;
     match s {
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
+        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Expr {..} |
+        Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
+        Stmt::Free {..} => {
             acc.push(s);
         },
         Stmt::For {var, lo, hi, step, body, par, i} if par.is_parallel() => {
@@ -605,8 +608,9 @@ fn hoist_inner_sequential_loops_stmt(
     s: Stmt
 ) -> CompileResult<Vec<Stmt>> {
     match s {
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
+        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Expr {..} |
+        Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
+        Stmt::Free {..} => {
             acc.push(s);
         },
         Stmt::For {ref var, ..} if t.roots.contains_key(&var) => {
@@ -655,8 +659,8 @@ fn split_inter_block_synchronization_kernel(
             acc
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::While {..} |
-        Stmt::If {..} | Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
-        Stmt::Free {..} => {
+        Stmt::If {..} | Stmt::Expr {..} | Stmt::Return {..} | Stmt::SyncPoint {..} |
+        Stmt::Alloc {..} | Stmt::Free {..} => {
             s.sflatten(acc, split_inter_block_synchronization_kernel)
         }
     }
@@ -668,8 +672,8 @@ fn split_inter_block_synchronization_stmt(acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> 
             split_inter_block_synchronization_kernel(acc, s.clone())
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-        Stmt::For {..} | Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-        Stmt::Alloc {..} | Stmt::Free {..} => {
+        Stmt::For {..} | Stmt::While {..} | Stmt::If {..} | Stmt::Expr {..} |
+        Stmt::Return {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
             s.sflatten(acc, split_inter_block_synchronization_stmt)
         }
     }
@@ -720,8 +724,9 @@ fn eliminate_unnecessary_synchronization_points_stmt(
             let els = eliminate_unnecessary_synchronization_points_stmts(env, els);
             acc.push(Stmt::If {cond, thn, els, i});
         },
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-        Stmt::SyncPoint {..} | Stmt::Alloc {..} | Stmt::Free {..} => {
+        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Expr {..} |
+        Stmt::Return {..} | Stmt::SyncPoint {..} | Stmt::Alloc {..} |
+        Stmt::Free {..} => {
             acc.push(s);
         },
     }
@@ -780,7 +785,7 @@ fn resymbolize_duplicated_loops_stmt(
             (vars, Stmt::For {var, lo, hi, step, body, par, i})
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-        Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} |
+        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
         Stmt::Alloc {..} | Stmt::Free {..} => {
             s.smap_accum_l(vars, resymbolize_duplicated_loops_stmt)
         }

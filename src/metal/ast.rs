@@ -207,6 +207,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>},
     While {cond: Expr, body: Vec<Stmt>},
     Return {value: Expr},
+    Expr {e: Expr},
 
     // Metal-specific statements
     AllocThreadgroup {elem_ty: Type, id: Name, sz: usize},
@@ -254,6 +255,10 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value}))
             },
+            Stmt::Expr {e} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e}))
+            },
             Stmt::CopyMemory {elem_ty, src, src_mem, dst, dst_mem, sz} => {
                 let (acc, src) = f(acc?, src)?;
                 let (acc, dst) = f(acc, dst)?;
@@ -292,7 +297,7 @@ impl SMapAccum<Stmt> for Stmt {
                 Ok((acc, Stmt::While {cond, body}))
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::AllocThreadgroup {..} | Stmt::CopyMemory {..} |
+            Stmt::Expr {..} | Stmt::AllocThreadgroup {..} | Stmt::CopyMemory {..} |
             Stmt::FreeDevice {..} | Stmt::ThreadgroupBarrier | Stmt::SubmitWork |
             Stmt::CheckError {..} => {
                 Ok((acc?, self))
@@ -322,9 +327,9 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::While {cond, body});
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::AllocThreadgroup {..} | Stmt::ThreadgroupBarrier {..} |
-            Stmt::CopyMemory {..} | Stmt::FreeDevice {..} | Stmt::SubmitWork |
-            Stmt::CheckError {..} => {
+            Stmt::Expr {..} | Stmt::AllocThreadgroup {..} |
+            Stmt::ThreadgroupBarrier {..} | Stmt::CopyMemory {..} |
+            Stmt::FreeDevice {..} | Stmt::SubmitWork | Stmt::CheckError {..} => {
                 acc.push(self);
             }
         };

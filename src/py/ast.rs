@@ -169,6 +169,7 @@ pub enum Expr {
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type, i: Info},
     GpuContext {ty: Type, i: Info},
+    Inline {e: Box<Expr>, ty: Type, i: Info},
     Label {label: String, ty: Type, i: Info},
     StaticBackendEq {backend: CompileBackend, ty: Type, i: Info},
     StaticTypesEq {lhs: TensorElemSize, rhs: TensorElemSize, ty: Type, i: Info},
@@ -193,10 +194,11 @@ impl Expr {
             Expr::Call {..} => 12,
             Expr::Convert {..} => 13,
             Expr::GpuContext {..} => 14,
-            Expr::Label {..} => 15,
-            Expr::StaticBackendEq {..} => 16,
-            Expr::StaticTypesEq {..} => 17,
-            Expr::StaticFail {..} => 18,
+            Expr::Inline {..} => 15,
+            Expr::Label {..} => 16,
+            Expr::StaticBackendEq {..} => 17,
+            Expr::StaticTypesEq {..} => 18,
+            Expr::StaticFail {..} => 19,
         }
     }
 
@@ -217,6 +219,7 @@ impl Expr {
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
             Expr::Convert {e, ty, ..} => Expr::Convert {e, ty, i},
             Expr::GpuContext {ty, ..} => Expr::GpuContext {ty, i},
+            Expr::Inline {e, ty, ..} => Expr::Inline {e, ty, i},
             Expr::Label {label, ty, ..} => Expr::Label {label, ty, i},
             Expr::StaticBackendEq {backend, ty, ..} => Expr::StaticBackendEq {backend, ty, i},
             Expr::StaticTypesEq {lhs, rhs, ty, ..} => Expr::StaticTypesEq {lhs, rhs, ty, i},
@@ -243,6 +246,7 @@ impl ExprType<Type> for Expr {
             Expr::Call {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
             Expr::GpuContext {ty, ..} => ty,
+            Expr::Inline {ty, ..} => ty,
             Expr::Label {ty, ..} => ty,
             Expr::StaticBackendEq {ty, ..} => ty,
             Expr::StaticTypesEq {ty, ..} => ty,
@@ -257,8 +261,9 @@ impl ExprType<Type> for Expr {
             Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
             Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
             Expr::Tuple {..} | Expr::Call {..} | Expr::Convert {..} |
-            Expr::GpuContext {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
-            Expr::StaticTypesEq {..} | Expr::StaticFail {..} => false,
+            Expr::GpuContext {..} | Expr::Inline {..} | Expr::Label {..} |
+            Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
+            Expr::StaticFail {..} => false,
         }
     }
 }
@@ -293,6 +298,7 @@ impl Ord for Expr {
                 lid.cmp(rid).then(largs.cmp(rargs)),
             (Expr::Convert {e: le, ty: lty, ..}, Expr::Convert {e: re, ty: rty, ..}) =>
                 le.cmp(re).then(lty.cmp(rty)),
+            (Expr::Inline {e: le, ..}, Expr::Inline {e: re, ..}) => le.cmp(re),
             (Expr::StaticBackendEq {backend: lb, ..}, Expr::StaticBackendEq {backend: rb, ..}) =>
                 lb.cmp(rb),
             ( Expr::StaticTypesEq {lhs: llhs, rhs: lrhs, ..}
@@ -337,6 +343,7 @@ impl InfoNode for Expr {
             Expr::Call {i, ..} => i.clone(),
             Expr::Convert {i, ..} => i.clone(),
             Expr::GpuContext {i, ..} => i.clone(),
+            Expr::Inline {i, ..} => i.clone(),
             Expr::Label {i, ..} => i.clone(),
             Expr::StaticBackendEq {i, ..} => i.clone(),
             Expr::StaticTypesEq {i, ..} => i.clone(),
@@ -405,6 +412,10 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, e) = f(acc?, *e)?;
                 Ok((acc, Expr::Convert {e: Box::new(e), ty, i}))
             },
+            Expr::Inline {e, ty, i} => {
+                let (acc, e) = f(acc?, *e)?;
+                Ok((acc, Expr::Inline {e: Box::new(e), ty, i}))
+            },
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |
             Expr::Label {..} | Expr::StaticBackendEq {..} |
@@ -431,6 +442,7 @@ impl SFold<Expr> for Expr {
             Expr::Tuple {elems, ..} => elems.sfold_result(acc, &f),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
+            Expr::Inline {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} | Expr::GpuContext {..} |
             Expr::Label {..} | Expr::StaticBackendEq {..} |
@@ -451,9 +463,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>, i: Info},
     Return {value: Expr, i: Info},
     WithGpuContext {body: Vec<Stmt>, i: Info},
-    Call {func: Name, args: Vec<Expr>, i: Info},
-    Label {label: String, i: Info},
-    StaticFail {msg: String, i: Info},
+    Expr {e: Expr, i: Info},
 }
 
 impl InfoNode for Stmt {
@@ -466,9 +476,7 @@ impl InfoNode for Stmt {
             Stmt::If {i, ..} => i.clone(),
             Stmt::Return {i, ..} => i.clone(),
             Stmt::WithGpuContext {i, ..} => i.clone(),
-            Stmt::Call {i, ..} => i.clone(),
-            Stmt::Label {i, ..} => i.clone(),
-            Stmt::StaticFail {i, ..} => i.clone(),
+            Stmt::Expr {i, ..} => i.clone(),
         }
     }
 }
@@ -506,12 +514,13 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value, i}))
             },
-            Stmt::Call {func, args, i} => {
-                let (acc, args) = args.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Stmt::Call {func, args, i}))
+            Stmt::Expr {e, i} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e, i}))
             },
-            Stmt::WithGpuContext {..} | Stmt::Label {..} | Stmt::StaticFail {..} =>
-                Ok((acc?, self)),
+            Stmt::WithGpuContext {..} => {
+                Ok((acc?, self))
+            },
         }
     }
 }
@@ -529,8 +538,8 @@ impl SFold<Expr> for Stmt {
             Stmt::While {cond, ..} => f(acc?, cond),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::Return {value, ..} => f(acc?, value),
-            Stmt::Call {args, ..} => args.sfold_result(acc, &f),
-            Stmt::WithGpuContext {..} | Stmt::Label {..} | Stmt::StaticFail {..} => acc,
+            Stmt::Expr {e, ..} => f(acc?, e),
+            Stmt::WithGpuContext {..} => acc,
         }
     }
 }
@@ -560,7 +569,7 @@ impl SMapAccum<Stmt> for Stmt {
                 Ok((acc, Stmt::WithGpuContext {body, i}))
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Label {..} | Stmt::Call {..} | Stmt::StaticFail {..} => {
+            Stmt::Expr {..} => {
                 Ok((acc?, self))
             }
         }
@@ -579,7 +588,7 @@ impl SFold<Stmt> for Stmt {
             Stmt::If {thn, els, ..} => els.sfold_result(thn.sfold_result(acc, &f), &f),
             Stmt::WithGpuContext {body, ..} => body.sfold_result(acc, &f),
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Label {..} | Stmt::Call {..} | Stmt::StaticFail {..} => acc
+            Stmt::Expr {..} => acc
         }
     }
 }
@@ -609,7 +618,7 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::WithGpuContext {body, i});
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Call {..} | Stmt::Label {..} | Stmt::StaticFail {..} => {
+            Stmt::Expr {..} => {
                 acc.push(self);
             },
         };

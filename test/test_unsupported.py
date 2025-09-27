@@ -132,3 +132,15 @@ def test_unbound_type_variable(backend):
     with pytest.raises(RuntimeError) as e_info:
         parpy.print_compiled(unbound_type_var_conversion, [x], opts)
     assert e_info.match("Found unresolved type variable")
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_inlining_call_expr(backend):
+    @parpy.jit
+    def add_func(x, y):
+        return x + y
+    with pytest.raises(RuntimeError) as e_info:
+        @parpy.jit
+        def invalid_call_inlining():
+            with parpy.gpu:
+                x = parpy.builtin.inline(add_func(2, 3))
+    assert e_info.match("Expression cannot be inlined")

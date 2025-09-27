@@ -309,6 +309,7 @@ pub enum Stmt {
     While {cond: Expr, body: Vec<Stmt>, i: Info},
     Return {value: Expr, i: Info},
     Scope {body: Vec<Stmt>, i: Info},
+    Expr {e: Expr, i: Info},
 
     // Intermediate node representing a parallel reduction.
     ParallelReduction {
@@ -355,6 +356,7 @@ impl InfoNode for Stmt {
             Stmt::While {i, ..} => i.clone(),
             Stmt::Return {i, ..} => i.clone(),
             Stmt::Scope {i, ..} => i.clone(),
+            Stmt::Expr {i, ..} => i.clone(),
             Stmt::ParallelReduction {i, ..} => i.clone(),
             Stmt::Synchronize {i, ..} => i.clone(),
             Stmt::WarpReduce {i, ..} => i.clone(),
@@ -402,6 +404,10 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value, i}))
             },
+            Stmt::Expr {e, i} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e, i}))
+            },
             Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i} => {
                 let (acc, init) = f(acc?, init)?;
                 let (acc, cond) = f(acc, cond)?;
@@ -431,7 +437,9 @@ impl SMapAccum<Expr> for Stmt {
                 Ok((acc, Stmt::CopyMemory {elem_ty, src, dst, sz, src_mem, dst_mem, i}))
             },
             Stmt::Scope {..} | Stmt::Synchronize {..} | Stmt::AllocDevice {..} |
-            Stmt::AllocShared {..} | Stmt::FreeDevice {..} => Ok((acc?, self)),
+            Stmt::AllocShared {..} | Stmt::FreeDevice {..} => {
+                Ok((acc?, self))
+            },
         }
     }
 }
@@ -449,6 +457,7 @@ impl SFold<Expr> for Stmt {
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::While {cond, ..} => f(acc?, cond),
             Stmt::Return {value, ..} => f(acc?, value),
+            Stmt::Expr {e, ..} => f(acc?, e),
             Stmt::ParallelReduction {init, cond, incr, ..} =>
                 f(f(f(acc?, init)?, cond)?, incr),
             Stmt::WarpReduce {value, ..} => f(acc?, value),
@@ -457,7 +466,9 @@ impl SFold<Expr> for Stmt {
             Stmt::KernelLaunch {args, ..} => args.sfold_result(acc, &f),
             Stmt::CopyMemory {src, dst, ..} => f(f(acc?, src)?, dst),
             Stmt::Scope {..} | Stmt::Synchronize {..} | Stmt::AllocDevice {..} |
-            Stmt::AllocShared {..} | Stmt::FreeDevice {..} => acc,
+            Stmt::AllocShared {..} | Stmt::FreeDevice {..} => {
+                acc
+            },
         }
     }
 }
@@ -491,8 +502,9 @@ impl SMapAccum<Stmt> for Stmt {
                 Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i}))
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Synchronize {..} | Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} |
-            Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
+            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
+            Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+            Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
             Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
                 Ok((acc?, self))
             }
@@ -513,8 +525,9 @@ impl SFold<Stmt> for Stmt {
             Stmt::Scope {body, ..} => body.sfold_result(acc, &f),
             Stmt::ParallelReduction {body, ..} => body.sfold_result(acc, &f),
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Synchronize {..} | Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} |
-            Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
+            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
+            Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+            Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
             Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => acc,
         }
     }
@@ -545,9 +558,10 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::Scope {body, i})
             }
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
-            Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
-            Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
+            Stmt::Expr {..} | Stmt::ParallelReduction {..} | Stmt::Synchronize {..} |
+            Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+            Stmt::AllocDevice {..} | Stmt::AllocShared {..} | Stmt::FreeDevice {..} |
+            Stmt::CopyMemory {..} => {
                 acc.push(self);
             }
         };

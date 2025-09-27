@@ -474,8 +474,7 @@ fn replace_slices_stmt(s: Stmt, scalar_sizes: &ScalarSizes) -> PyResult<Stmt> {
             replace_slices_assignment(reconstruct_assign, dst, expr, labels, i, scalar_sizes, false)
         },
         Stmt::For {..} | Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
-        Stmt::WithGpuContext {..} | Stmt::Call {..} | Stmt::Label {..} |
-        Stmt::StaticFail {..} => {
+        Stmt::WithGpuContext {..} | Stmt::Expr {..} => {
             s.smap_result(|s| replace_slices_stmt(s, scalar_sizes))
         }
     }

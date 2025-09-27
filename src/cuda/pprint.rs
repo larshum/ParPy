@@ -384,6 +384,10 @@ impl PrettyPrint for Stmt {
                 let (env, value) = value.pprint(env);
                 (env, format!("{indent}return {value};"))
             },
+            Stmt::Expr {e} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}{e};"))
+            },
             Stmt::Synchronize {scope} => {
                 let s = match scope {
                     SyncScope::Block => "__syncthreads()",

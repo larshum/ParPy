@@ -135,6 +135,10 @@ impl PrettyPrint for Stmt {
                 let env = env.decr_indent();
                 (env, format!("{0}while ({cond}) {{\n{body}\n{0}}}", indent))
             },
+            Stmt::Expr {e, ..} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}{e};"))
+            },
             Stmt::Return {value, ..} => {
                 let (env, value) = value.pprint(env);
                 (env, format!("{indent}return {value};"))

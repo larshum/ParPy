@@ -322,6 +322,10 @@ fn generate_kernel_stmt(
             let body = generate_kernel_stmts(grid, map, vec![], body)?;
             acc.push(Stmt::While {cond, body, i});
         },
+        ir_ast::Stmt::Expr {e, i} => {
+            let e = from_ir_expr(e)?;
+            acc.push(Stmt::Expr {e, i});
+        },
         ir_ast::Stmt::Return {value, i} => {
             let value = from_ir_expr(value)?;
             acc.push(Stmt::Return {value, i});
@@ -454,6 +458,11 @@ fn from_ir_stmt(
         ir_ast::Stmt::Return {value, i} => {
             let value = from_ir_expr(value)?;
             host_body.push(Stmt::Return {value, i});
+            Ok(kernels)
+        },
+        ir_ast::Stmt::Expr {e, i} => {
+            let e = from_ir_expr(e)?;
+            host_body.push(Stmt::Expr {e, i});
             Ok(kernels)
         },
         ir_ast::Stmt::Alloc {id, elem_ty, sz, i} => {

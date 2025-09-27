@@ -108,7 +108,7 @@ fn specialize_stmt<'a>(
         },
         // If the compiler reaches a static fail statement, it immediately produces a runtime error
         // based on the contents of the node.
-        Stmt::StaticFail {msg, i} => py_runtime_error!(i, "{msg}"),
+        Stmt::Expr {e: Expr::StaticFail {msg, ..}, i} => py_runtime_error!(i, "{msg}"),
         _ => {
             let s = s.smap_result(|e| specialize_expr(env, e))?;
             s.sflatten_result(acc, |acc, s| specialize_stmt(env, acc, s))

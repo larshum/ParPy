@@ -223,6 +223,22 @@ fn convert_fail_builtin<'py, 'a>(
     Ok(Expr::StaticFail {msg, ty: Type::Unknown, i})
 }
 
+fn convert_inline_builtin<'py, 'a>(
+    mut args: Vec<Bound<'py, PyAny>>,
+    env: &ConvertEnv<'py, 'a>,
+    i: Info
+) -> PyResult<Expr> {
+    let n = args.len();
+    if n == 1 {
+        match convert_expr(args.pop().unwrap(), env)? {
+            e @ Expr::Call {..} => Ok(Expr::Inline {e: Box::new(e), ty: Type::Unknown, i}),
+            _ => py_runtime_error!(i, "Inline expects a call expression argument")
+        }
+    } else {
+        py_runtime_error!(i, "Inline builtin expects one argument but found {n}")
+    }
+}
+
 fn convert_static_backend_equality<'py, 'a>(
     mut args: Vec<Bound<'py, PyAny>>,
     env: &ConvertEnv<'py, 'a>,
@@ -307,6 +323,10 @@ fn convert_builtin<'py, 'a>(
             // Labeling (only usable as a statement)
             } else if e.eq(parpy_builtins.getattr("label")?)? {
                 Some(convert_label_builtin(args, env, i)?)
+
+            // Inlining of calls (only usable as a statement)
+            } else if e.eq(parpy_builtins.getattr("inline")?)? {
+                Some(convert_inline_builtin(args, env, i)?)
 
             // Statically evaluated nodes used for compile-time specialization
             } else if e.eq(parpy_builtins.getattr("static_backend_eq")?)? {
@@ -541,14 +561,9 @@ fn construct_expr_stmt(
     i: &Info
 ) -> PyResult<Stmt> {
     match value {
-        Expr::Label {label, ..} => {
-            Ok(Stmt::Label {label, i: i.clone()})
-        },
-        Expr::StaticFail {msg, ..} => {
-            Ok(Stmt::StaticFail {msg, i: i.clone()})
-        },
-        Expr::Call {id, args, ..} => {
-            Ok(Stmt::Call {func: id, args, i: i.clone()})
+        Expr::Inline {..} | Expr::Label {..} | Expr::StaticFail {..} |
+        Expr::Call {..} => {
+            Ok(Stmt::Expr {e: value, i: i.clone()})
         },
         _ => py_runtime_error!(i, "Unsupported expression statement")
     }
