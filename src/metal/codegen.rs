@@ -179,6 +179,10 @@ fn from_gpu_ir_stmt(env: &CodegenEnv, s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             let value = from_gpu_ir_expr(env, value)?;
             Ok(Stmt::Return {value})
         },
+        gpu_ast::Stmt::Expr {e, ..} => {
+            let e = from_gpu_ir_expr(env, e)?;
+            Ok(Stmt::Expr {e})
+        },
         gpu_ast::Stmt::Scope {i, ..} => {
             parpy_internal_error!(i, "Found scope statement that should have \
                                         been eliminated.")

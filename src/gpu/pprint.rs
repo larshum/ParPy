@@ -237,7 +237,7 @@ impl PrettyPrint for LaunchArgs {
         let (env, blocks) = blocks.pprint(env);
         let (env, threads) = threads.pprint(env);
         let indent = env.print_indent();
-        (env, format!("{indent}{{blocks: ({blocks}), threads: ({threads})}};"))
+        (env, format!("{{blocks: ({blocks}), threads: ({threads})}};"))
     }
 }
 
@@ -321,6 +321,10 @@ impl PrettyPrint for Stmt {
                 let (env, body) = pprint_iter(body.iter(), env, "\n");
                 let env = env.decr_indent();
                 (env, format!("{0}{{\n{1}\n{0}}}", indent, body))
+            },
+            Stmt::Expr {e, ..} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}{e};"))
             },
             Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, ..} => {
                 let (env, var_ty) = var_ty.pprint(env);

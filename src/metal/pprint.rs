@@ -287,6 +287,10 @@ impl PrettyPrint for Stmt {
                 let (env, value) = value.pprint(env);
                 (env, format!("{indent}return {value};"))
             },
+            Stmt::Expr {e} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}{e};"))
+            },
             Stmt::ThreadgroupBarrier => {
                 (env, format!("{indent}metal::threadgroup_barrier(metal::mem_flags::mem_threadgroup);"))
             },

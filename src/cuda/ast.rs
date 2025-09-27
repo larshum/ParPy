@@ -279,6 +279,7 @@ pub enum Stmt {
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>},
     While {cond: Expr, body: Vec<Stmt>},
     Return {value: Expr},
+    Expr {e: Expr},
 
     // CUDA-specific nodes
     Synchronize {scope: SyncScope},
@@ -326,6 +327,10 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, value) = f(acc?, value)?;
                 Ok((acc, Stmt::Return {value}))
             },
+            Stmt::Expr {e} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::Expr {e}))
+            },
             Stmt::KernelLaunch {id, blocks, threads, args, stream} => {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::KernelLaunch {id, blocks, threads, args, stream}))
@@ -355,6 +360,7 @@ impl SFold<Expr> for Stmt {
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::While {cond, ..} => f(acc?, cond),
             Stmt::Return {value, ..} => f(acc?, value),
+            Stmt::Expr {e, ..} => f(acc?, e),
             Stmt::KernelLaunch {args, ..} => args.sfold_result(acc, &f),
             Stmt::CheckError {e} => f(acc?, e),
             Stmt::AllocShared {..} | Stmt::Synchronize {..} => acc
@@ -383,7 +389,7 @@ impl SMapAccum<Stmt> for Stmt {
                 Ok((acc, Stmt::While {cond, body}))
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::AllocShared {..} | Stmt::Synchronize {..} |
+            Stmt::Expr {..} | Stmt::AllocShared {..} | Stmt::Synchronize {..} |
             Stmt::KernelLaunch {..} | Stmt::CheckError {..} => Ok((acc?, self))
         }
     }
@@ -400,7 +406,7 @@ impl SFold<Stmt> for Stmt {
             Stmt::If {thn, els, ..} => els.sfold_result(thn.sfold_result(acc, &f), &f),
             Stmt::While {body, ..} => body.sfold_result(acc, &f),
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::AllocShared {..} | Stmt::Synchronize {..} |
+            Stmt::Expr {..} | Stmt::AllocShared {..} | Stmt::Synchronize {..} |
             Stmt::KernelLaunch {..} | Stmt::CheckError {..} => acc
         }
     }
@@ -427,7 +433,7 @@ impl SFlatten<Stmt> for Stmt {
                 acc.push(Stmt::While {cond, body});
             },
             Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Synchronize {..} | Stmt::KernelLaunch {..} |
+            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocShared {..} | Stmt::CheckError {..} => {
                 acc.push(self);
             }

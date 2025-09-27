@@ -52,9 +52,9 @@ fn fv_stmt(mut env: FVEnv, s: &Stmt) -> FVEnv {
             env
         },
         Stmt::Assign {..} | Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} |
-        Stmt::Scope {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
-        Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
-        Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
+        Stmt::Scope {..} | Stmt::Expr {..} | Stmt::Synchronize {..} |
+        Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+        Stmt::AllocDevice {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
             let env = s.sfold(env, fv_expr);
             s.sfold(env, fv_stmt)
         }

@@ -374,9 +374,14 @@ fn to_ir_stmt(
             let par = LoopPar::default().threads(1).unwrap();
             Ok(Stmt::For {var, lo, hi, step: 1, body, par, i})
         },
-        py_ast::Stmt::Expr {i, ..} => {
-            parpy_internal_error!(i, "Found Expr statement node in IR translation")
+        py_ast::Stmt::Expr {e: e @ py_ast::Expr::Call {..}, i} => {
+            let e = to_ir_expr(env, e)?;
+            Ok(Stmt::Expr {e, i})
         },
+        py_ast::Stmt::Expr {i, ..} =>{
+            parpy_internal_error!(i, "Found unsupported Expr statement \
+                                      node in IR translation")
+        }
     }
 }
 

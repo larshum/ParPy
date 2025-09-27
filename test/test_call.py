@@ -74,6 +74,12 @@ def add_2d_inplace(x, y, N, M):
         parpy.builtin.inline(add_inplace(x[i], y[i], M))
 
 @parpy.jit
+def add_2d_inplace_no_inline(x, y, N, M):
+    parpy.label('2d')
+    for i in range(N):
+        add_inplace(x[i], y[i], M)
+
+@parpy.jit
 def add_2d_inplace_x2(x, y, z, w, N, M):
     parpy.label("2d")
     for i in range(N):
@@ -93,6 +99,16 @@ def test_call(backend):
         y = torch.zeros_like(x)
         p = {'2d': parpy.threads(10), '1d': parpy.threads(15)}
         add_2d_inplace(x, y, 10, 15, opts=par_opts(backend, p))
+        assert torch.allclose(x, y)
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_call_stmt_no_inlining(backend):
+    def helper():
+        x = torch.randn(10, 15)
+        y = torch.zeros_like(x)
+        p = {'2d': parpy.threads(10)}
+        add_2d_inplace_no_inline(x, y, 10, 15, opts=par_opts(backend, p))
         assert torch.allclose(x, y)
     run_if_backend_is_enabled(backend, helper)
 

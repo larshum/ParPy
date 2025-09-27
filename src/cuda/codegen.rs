@@ -155,6 +155,10 @@ fn from_gpu_ir_stmt(s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             parpy_internal_error!(i, "Found scope statement that should have \
                                         been eliminated.")
         },
+        gpu_ast::Stmt::Expr {e, ..} => {
+            let e = from_gpu_ir_expr(e)?;
+            Ok(Stmt::Expr {e})
+        },
         gpu_ast::Stmt::ParallelReduction {i, ..} => {
             parpy_internal_error!(i, "Found parallel reduction statement \
                                         that should have been eliminated.")

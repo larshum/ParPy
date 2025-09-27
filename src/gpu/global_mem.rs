@@ -74,10 +74,10 @@ fn find_thread_index_dependent_variables_stmt(
             body.sfold(Ok(acc), find_thread_index_dependent_variables_stmt)
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::While {..} | Stmt::If {..} |
-        Stmt::Return {..} | Stmt::Scope {..} | Stmt::ParallelReduction {..} |
-        Stmt::Synchronize {..} | Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} |
-        Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
-        Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
+        Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
+        Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
+        Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
+        Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
             stmt.sfold(Ok(acc), find_thread_index_dependent_variables_stmt)
         }
     }
@@ -154,7 +154,7 @@ fn transform_thread_independent_memory_writes_stmt(
             acc
         },
         Stmt::Definition {..} | Stmt::Assign {..} | Stmt::For {..} | Stmt::If {..} |
-        Stmt::While {..} | Stmt::Return {..} | Stmt::Scope {..} |
+        Stmt::While {..} | Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
         Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
         Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
         Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
