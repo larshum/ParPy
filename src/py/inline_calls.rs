@@ -1,10 +1,10 @@
 use super::ast::*;
 use crate::py_runtime_error;
 use crate::utils::err::*;
-use crate::utils::info::Info;
+use crate::utils::info::{Info, InfoNode};
 use crate::utils::name::Name;
 use crate::utils::pprint::PrettyPrint;
-use crate::utils::smap::SMapAccum;
+use crate::utils::smap::{SFold, SMapAccum};
 
 use pyo3::prelude::*;
 use pyo3::types::*;
@@ -65,7 +65,6 @@ fn inline_function_calls_stmt<'py>(
         Stmt::Expr {e: Expr::Inline {e, ..}, i} => {
             match *e {
                 Expr::Call {id, args, ..} => {
-                    println!("Attempting to inline function {id}");
                     if let Some(ast_ref) = tops.get(id.get_str()) {
                         let t: Top = unsafe { ast_ref.reference::<Top>() }.clone();
                         match t {
@@ -122,11 +121,28 @@ fn inline_function_calls_stmts<'py>(
         .fold(Ok(vec![]), |acc, stmt| inline_function_calls_stmt(acc?, stmt, tops))
 }
 
+fn ensure_no_remaining_inline_expr_in_expr(acc: (), e: &Expr) -> PyResult<()> {
+    match e {
+        Expr::Inline {e, ..} => py_runtime_error!(e.get_info(), "Expression cannot be inlined"),
+        _ => e.sfold_result(Ok(acc), ensure_no_remaining_inline_expr_in_expr)
+    }
+}
+
+fn ensure_no_remaining_inline_expr_in_stmt(acc: (), s: &Stmt) -> PyResult<()> {
+    s.sfold_result(Ok(acc), ensure_no_remaining_inline_expr_in_stmt)?;
+    s.sfold_result(Ok(()), ensure_no_remaining_inline_expr_in_expr)
+}
+
+fn ensure_no_remaining_inline_expr_in_body(body: &Vec<Stmt>) -> PyResult<()> {
+    body.sfold_result(Ok(()), ensure_no_remaining_inline_expr_in_stmt)
+}
+
 pub fn inline_function_calls<'py>(
     fun: FunDef,
     tops: &BTreeMap<String, Bound<'py, PyCapsule>>
 ) -> PyResult<FunDef> {
     let body = inline_function_calls_stmts(fun.body, tops)?;
+    ensure_no_remaining_inline_expr_in_body(&body)?;
     Ok(FunDef {body, ..fun})
 }
 

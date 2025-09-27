@@ -236,7 +236,6 @@ impl PrettyPrint for LaunchArgs {
         let LaunchArgs {blocks, threads} = self;
         let (env, blocks) = blocks.pprint(env);
         let (env, threads) = threads.pprint(env);
-        let indent = env.print_indent();
         (env, format!("{{blocks: ({blocks}), threads: ({threads})}};"))
     }
 }
