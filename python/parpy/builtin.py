@@ -22,6 +22,9 @@ def convert(e, ty):
 def label(x):
     assert x is not None, "parpy.label expects one argument"
 
+def inline(e):
+    pass
+
 def static_backend_eq(x):
     return False
 

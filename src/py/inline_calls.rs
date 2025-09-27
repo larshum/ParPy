@@ -3,6 +3,7 @@ use crate::py_runtime_error;
 use crate::utils::err::*;
 use crate::utils::info::Info;
 use crate::utils::name::Name;
+use crate::utils::pprint::PrettyPrint;
 use crate::utils::smap::SMapAccum;
 
 use pyo3::prelude::*;
@@ -42,8 +43,8 @@ fn substitute_variables_expr(e: Expr, sub_map: &BTreeMap<Name, Expr>) -> Expr {
         Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
         Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
         Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
-        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Label {..} |
-        Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
+        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Inline {..} |
+        Expr::Label {..} | Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
         Expr::StaticFail {..} => {
             e.smap(|e| substitute_variables_expr(e, sub_map))
         }
@@ -61,22 +62,32 @@ fn inline_function_calls_stmt<'py>(
     tops: &BTreeMap<String, Bound<'py, PyCapsule>>
 ) -> PyResult<Vec<Stmt>> {
     match stmt {
-        Stmt::Expr {e: Expr::Call {id, args, ..}, i} => {
-            if let Some(ast_ref) = tops.get(id.get_str()) {
-                let t: Top = unsafe { ast_ref.reference::<Top>() }.clone();
-                match t {
-                    Top::FunDef {v: fun} => {
-                        let sub_map = construct_sub_map(fun.params, args, &fun.id, &fun.i)?;
-                        let mut body = fun.body.smap(|s| substitute_variables_stmt(s, &sub_map));
-                        acc.append(&mut body);
-                    },
-                    Top::ExtDecl {id, ..} => {
-                        py_runtime_error!(i, "Cannot inline call to external function {id}")?
-                    },
+        Stmt::Expr {e: Expr::Inline {e, ..}, i} => {
+            match *e {
+                Expr::Call {id, args, ..} => {
+                    println!("Attempting to inline function {id}");
+                    if let Some(ast_ref) = tops.get(id.get_str()) {
+                        let t: Top = unsafe { ast_ref.reference::<Top>() }.clone();
+                        match t {
+                            Top::FunDef {v: fun} => {
+                                let sub_map = construct_sub_map(fun.params, args, &fun.id, &fun.i)?;
+                                let mut body = fun.body.smap(|s| substitute_variables_stmt(s, &sub_map));
+                                acc.append(&mut body);
+                                Ok(())
+                            },
+                            Top::ExtDecl {id, ..} => {
+                                py_runtime_error!(i, "Cannot inline call to external function {id}")
+                            },
+                        }
+                    } else {
+                        py_runtime_error!(i, "Reference to unknown function {id}.")
+                    }
+                },
+                e => {
+                    let s = e.pprint_default();
+                    py_runtime_error!(i, "Unexpected form of inline expression: {s}")
                 }
-            } else {
-                py_runtime_error!(i, "Reference to unknown function {id}.")?
-            }
+            }?;
         },
         Stmt::For {var, lo, hi, step, body, labels, i} => {
             let body = inline_function_calls_stmts(body, tops)?;

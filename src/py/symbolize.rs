@@ -124,7 +124,7 @@ impl Symbolize for Expr {
             Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
             Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
             Expr::Slice {..} | Expr::Tuple {..} | Expr::GpuContext {..} |
-            Expr::Label {..} | Expr::StaticBackendEq {..} |
+            Expr::Inline {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
             Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }

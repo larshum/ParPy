@@ -285,6 +285,9 @@ fn to_ir_expr(
         py_ast::Expr::GpuContext {i, ..} => {
             parpy_internal_error!(i, "Found GpuContext expression node in IR translation")
         },
+        py_ast::Expr::Inline {i, ..} => {
+            parpy_internal_error!(i, "Found Inline expression node in IR translation")
+        },
         py_ast::Expr::Label {i, ..} => {
             parpy_internal_error!(i, "Found Label expression node in IR translation")
         },

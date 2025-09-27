@@ -71,20 +71,20 @@ def add_inplace(x, y, M):
 def add_2d_inplace(x, y, N, M):
     parpy.label("2d")
     for i in range(N):
-        add_inplace(x[i], y[i], M)
+        parpy.builtin.inline(add_inplace(x[i], y[i], M))
 
 @parpy.jit
 def add_2d_inplace_x2(x, y, z, w, N, M):
     parpy.label("2d")
     for i in range(N):
-        add_inplace(x[i], y[i], M)
-        add_inplace(z[i], w[i], M)
+        parpy.builtin.inline(add_inplace(x[i], y[i], M))
+        parpy.builtin.inline(add_inplace(z[i], w[i], M))
 
 @parpy.jit
 def add_3d_inplace(x, y, N, M, K):
     parpy.label('3d')
     for i in range(N):
-        add_2d_inplace(x[i], y[i], M, K)
+        parpy.builtin.inline(add_2d_inplace(x[i], y[i], M, K))
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_call(backend):
@@ -247,7 +247,7 @@ def test_call_other_module_function(backend):
         import test_static_eq
         @parpy.jit
         def set_value_based_on_backend(x):
-            test_static_eq.parpy_backend_set_value(x)
+            parpy.builtin.inline(test_static_eq.parpy_backend_set_value(x))
         x = torch.zeros((1,), dtype=torch.int32)
         x[0] = 10
         set_value_based_on_backend(x, opts=par_opts(backend, {}))

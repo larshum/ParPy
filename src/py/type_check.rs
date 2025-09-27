@@ -875,6 +875,11 @@ impl TypeCheck for Expr {
                 Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
             Expr::GpuContext {..} | Expr::Label {..} => Ok((env, self)),
+            Expr::Inline {e, ty: _, i} => {
+                let (env, e) = e.type_check(env)?;
+                let ty = e.get_type().clone();
+                Ok((env, Expr::Inline {e: Box::new(e), ty, i}))
+            },
             Expr::StaticBackendEq {backend, ty: _, i} => {
                 let ty = Type::fixed_scalar(ElemSize::Bool);
                 Ok((env, Expr::StaticBackendEq {backend, ty, i}))

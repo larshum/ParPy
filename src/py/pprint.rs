@@ -212,6 +212,10 @@ impl PrettyPrint for Expr {
                 (env, format!("{ty}({e})"))
             },
             Expr::GpuContext {..} => (env, format!("<gpu_context>")),
+            Expr::Inline {e, ..} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("<inline({e})>"))
+            },
             Expr::Label {label, ..} => (env, format!("<label({label})>")),
             Expr::StaticBackendEq {backend, ..} => {
                 (env, format!("<static_backend_eq({backend:?})>"))
