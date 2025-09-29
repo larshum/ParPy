@@ -128,7 +128,7 @@ mod test {
 
     fn get_identifier(t: &Top) -> Name {
         match t {
-            Top::ExtDecl {id, ..} |
+            Top::CallbackDecl {id, ..} | Top::ExtDecl {id, ..} |
             Top::FunDef {v: FunDef {id, ..}} => id.clone()
         }
     }
