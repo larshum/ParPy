@@ -37,19 +37,23 @@ def _get_source_code(fn):
         src = inspect.cleandoc(src)
     return src, fst_line-1, col_ofs
 
-def _convert_python_function_to_ir(fn, vars):
+def _parse_function(fn):
     import ast as python_ast
     import inspect
     import itertools
     filepath = inspect.getfile(fn)
     src, line_ofs, col_ofs = _get_source_code(fn)
     ast = python_ast.parse(src)
+    info = (filepath, line_ofs, col_ofs)
+    return ast, info
+
+def _convert_python_function_to_ir(fn, vars):
+    ast, info = _parse_function(fn)
 
     # Convert the Python representation of the AST to a Python-like
     # representation in the compiler. As part of this step, we inline any
     # references to previously parsed functions.
     top_map = _get_tops(None)
-    info = (filepath, line_ofs, col_ofs)
     return parpy.python_to_ir(ast, info, top_map, vars)
 
 def _check_kwarg(kwargs, key, expected_ty, fun_name):
@@ -74,12 +78,7 @@ def _validate_external_type(target, backend, par):
         raise RuntimeError(f"Unsupported external backend: {backend}")
 
 def _declare_external(fn, ext_name, target, header, parallelize, vars):
-    import ast as python_ast
-    import inspect
-    filepath = inspect.getfile(fn)
-    src, line_ofs, col_ofs = _get_source_code(fn)
-    ast = python_ast.parse(src)
-    info = (filepath, line_ofs, col_ofs)
+    ast, info = _parse_function(fn)
     return parpy.declare_external(ast, info, ext_name, target, header, parallelize, vars)
 
 def _check_kwargs(kwargs, fun_name):
@@ -124,12 +123,6 @@ def _compile_function(ir_ast, args, opts):
     wrap_fn = get_wrapper(name, cache_key, opts)
     _fun_cache[fast_cache_key] = wrap_fn
     return wrap_fn
-
-def _run_callbacks(callbacks, opts):
-    if len(callbacks) > 0:
-        sync(opts.backend)
-        for cb in callbacks:
-            cb()
 
 def threads(n):
     """
@@ -205,17 +198,13 @@ def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()
     vars = (globs, locs)
     def external_wrap(fn):
         import functools
-
-        @functools.wraps(fn)
-        def inner(*args):
-            return fn(*args)
         _validate_external_type(target, backend, parallelize)
         ext_decl = _declare_external(fn, ext_name, target, header, parallelize, vars)
         if not backend in _ext_decls:
             _ext_decls[backend] = {}
         _ext_decls[backend][_qualified_name(fn)] = ext_decl
         _ext_tops[_qualified_name(fn)] = ext_decl
-        return inner
+        return fn
     return external_wrap
 
 def jit(fun):
