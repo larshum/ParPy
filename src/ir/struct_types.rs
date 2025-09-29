@@ -95,7 +95,7 @@ fn find_dict_types_top(
     t: &Top
 ) -> DictTypes {
     match t {
-        Top::ExtDecl {..} => types,
+        Top::CallbackDecl {..} | Top::ExtDecl {..} => types,
         Top::FunDef {v} => find_dict_types_def(types, v),
     }
 }

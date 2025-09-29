@@ -487,7 +487,7 @@ fn replace_slices_fun_def(def: FunDef, scalar_sizes: &ScalarSizes) -> PyResult<F
 
 fn replace_slices_top(t: Top, scalar_sizes: &ScalarSizes) -> PyResult<Top> {
     match t {
-        Top::ExtDecl {..} => Ok(t),
+        Top::CallbackDecl {..} | Top::ExtDecl {..} => Ok(t),
         Top::FunDef {v} => Ok(Top::FunDef {v: replace_slices_fun_def(v, scalar_sizes)?})
     }
 }
@@ -513,7 +513,7 @@ fn ensure_no_remaining_slices_fun_def(def: FunDef) -> PyResult<FunDef> {
 
 fn ensure_no_remaining_slices_top(t: Top) -> PyResult<Top> {
     match t {
-        Top::ExtDecl {..} => Ok(t),
+        Top::CallbackDecl {..} | Top::ExtDecl {..} => Ok(t),
         Top::FunDef {v} => Ok(Top::FunDef {v: ensure_no_remaining_slices_fun_def(v)?})
     }
 }

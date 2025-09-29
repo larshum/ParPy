@@ -52,7 +52,7 @@ fn collect_duplicates_top(
                 }
             }
         },
-        Top::FunDef {..} => (env, Some(t))
+        Top::CallbackDecl {..} | Top::FunDef {..} => (env, Some(t))
     }
 }
 
@@ -82,6 +82,10 @@ fn replace_names_fun_def(env: &ElimDupEnv, def: FunDef) -> FunDef {
 
 fn replace_names_top(env: &ElimDupEnv, t: Top) -> Top {
     match t {
+        Top::CallbackDecl {id, params, i} => {
+            let id = lookup_name(env, id);
+            Top::CallbackDecl {id, params, i}
+        },
         Top::ExtDecl {id, ext_id, params, res_ty, target, header, par, i} => {
             let id = lookup_name(env, id);
             Top::ExtDecl {id, ext_id, params, res_ty, target, header, par, i}

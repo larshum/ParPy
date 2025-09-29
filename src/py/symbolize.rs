@@ -199,7 +199,8 @@ impl Symbolize for FunDef {
 fn extract_top_name<'py>(t: Bound<'py, PyCapsule>) -> Name {
     let t: &Top = unsafe { t.reference() };
     match t {
-        Top::ExtDecl {id, ..} | Top::FunDef {v: FunDef {id, ..}} => id.clone()
+        Top::CallbackDecl {id, ..} | Top::ExtDecl {id, ..} |
+        Top::FunDef {v: FunDef {id, ..}} => id.clone()
     }
 }
 

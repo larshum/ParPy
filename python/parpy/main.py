@@ -5,6 +5,7 @@ from .parpy import par, CompileBackend, CompileOptions, ElemSize, Target
 _ir_asts = {}
 _ext_decls = {}
 _ext_tops = {}
+_callbacks = {}
 _fun_cache = {}
 
 def _qualified_name(fn):
@@ -20,7 +21,7 @@ def _get_tops(backend):
             ext_tops = {}
     else:
         ext_tops = _ext_tops
-    return {**ast_tops, **ext_tops}
+    return {**ast_tops, **ext_tops, **_callbacks}
 
 def _get_source_code(fn):
     import inspect
@@ -76,6 +77,10 @@ def _validate_external_type(target, backend, par):
             raise RuntimeError(f"Host externals cannot be parallel")
     else:
         raise RuntimeError(f"Unsupported external backend: {backend}")
+
+def _declare_callback(fn, vars):
+    ast, info = _parse_function(fn)
+    return parpy.declare_callback(ast, info, vars)
 
 def _declare_external(fn, ext_name, target, header, parallelize, vars):
     ast, info = _parse_function(fn)
@@ -186,6 +191,14 @@ def print_compiled(fun, args, opts=CompileOptions()):
     top_map = _get_tops(opts.backend)
     code, _ = parpy.compile_ir(ir_ast, args, opts, top_map)
     return code
+
+def callback(fn):
+    import inspect
+    globs = inspect.currentframe().f_back.f_globals
+    locs = inspect.currentframe().f_back.f_locals
+    vars = (globs, locs)
+    _callbacks[_qualified_name(fn)] = _declare_callback(fn, vars)
+    return fn
 
 def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()):
     """

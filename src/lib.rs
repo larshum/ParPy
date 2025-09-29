@@ -36,6 +36,17 @@ fn python_to_ir<'py>(
 }
 
 #[pyfunction]
+fn declare_callback<'py>(
+    py_ast: Bound<'py, PyAny>,
+    info: (String, usize, usize),
+    vars: (Bound<'py, PyDict>, Bound<'py, PyDict>),
+    py: Python<'py>
+) -> PyResult<Bound<'py, PyCapsule>> {
+    let t = py::convert_callback(py_ast, info, vars)?;
+    Ok(PyCapsule::new::<py::ast::Top>(py, t, None)?)
+}
+
+#[pyfunction]
 fn declare_external<'py>(
     py_ast: Bound<'py, PyAny>,
     info: (String, usize, usize),
@@ -64,6 +75,7 @@ fn get_function_name<'py>(cap: Bound<'py, PyCapsule>) -> String {
         cap.reference()
     };
     match untyped_def {
+        py::ast::Top::CallbackDecl {id, ..} |
         py::ast::Top::ExtDecl {id, ..} |
         py::ast::Top::FunDef {v: py::ast::FunDef {id, ..}} => id.get_str().clone(),
     }
@@ -120,6 +132,7 @@ fn compile_ir<'py>(
 #[pymodule]
 fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python_to_ir, m)?)?;
+    m.add_function(wrap_pyfunction!(declare_callback, m)?)?;
     m.add_function(wrap_pyfunction!(declare_external, m)?)?;
     m.add_function(wrap_pyfunction!(print_ast, m)?)?;
     m.add_function(wrap_pyfunction!(get_function_name, m)?)?;

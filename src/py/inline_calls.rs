@@ -74,6 +74,9 @@ fn inline_function_calls_stmt<'py>(
                                 acc.append(&mut body);
                                 Ok(())
                             },
+                            Top::CallbackDecl {id, ..} => {
+                                py_runtime_error!(i, "Cannot inline call to callback function {id}")
+                            },
                             Top::ExtDecl {id, ..} => {
                                 py_runtime_error!(i, "Cannot inline call to external function {id}")
                             },

@@ -644,6 +644,7 @@ pub struct FunDef {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Top {
+    CallbackDecl {id: Name, params: Vec<Param>, i: Info},
     ExtDecl {
         id: Name, ext_id: String, params: Vec<Param>, res_ty: Type,
         target: Target, header: Option<String>, par: LoopPar, i: Info

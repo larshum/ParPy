@@ -21,12 +21,12 @@ use crate::option::*;
 use crate::utils::ast::ScalarSizes;
 use crate::utils::debug;
 use crate::utils::err::CompileError;
-use crate::utils::info::Info;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyCapsule, PyDict};
 use std::collections::BTreeMap;
 
+pub use from_py::convert_callback;
 pub use from_py::convert_external;
 pub use inline_calls::inline_function_calls;
 
@@ -52,11 +52,18 @@ pub fn specialize_ast_on_arguments<'py>(
     // declaration, in which case we report an error.
     let main = match t {
         ast::Top::FunDef {v} => Ok(v),
-        ast::Top::ExtDecl {id, ..} => {
+        ast::Top::CallbackDecl {id, i, ..} => {
             py_runtime_error!(
-                Info::default(),
-                "Expected {id} to be a function definition, but it is an \
-                 external function declaration"
+                i,
+                "Expected {id} to be a function definition, but found a \
+                 callback declaration."
+            )
+        },
+        ast::Top::ExtDecl {id, i, ..} => {
+            py_runtime_error!(
+                i,
+                "Expected {id} to be a function definition, but found an \
+                 external function declaration."
             )
         }
     }?;

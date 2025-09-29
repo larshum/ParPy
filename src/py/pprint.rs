@@ -319,6 +319,12 @@ impl PrettyPrint for FunDef {
 impl PrettyPrint for Top {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         match self {
+            Top::CallbackDecl {id, params, i: _} => {
+                let (env, id) = id.pprint(env);
+                let (env, params) = pprint_iter(params.iter(), env, ", ");
+                let indent = env.print_indent();
+                (env, format!("def {id}({params}):\n{indent}<callback>"))
+            },
             Top::ExtDecl {id, ext_id, params, res_ty, header, target, par, i: _} => {
                 let (env, id) = id.pprint(env);
                 let env = env.incr_indent();
