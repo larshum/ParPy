@@ -31,7 +31,7 @@ def test_metal_no_parallelism(backend):
         return
     with pytest.raises(RuntimeError) as e_info:
         code = parpy.print_compiled(sum_elems_per_row, [x, y, N, M], opts)
-    assert e_info.match(r".*Assignments are not allowed outside parallel code.*")
+    assert e_info.match(r".*Data cannot be accessed outside parallel code.*")
 
 def test_metal_catch_runtime_error():
     backend = parpy.CompileBackend.Metal

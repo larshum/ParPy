@@ -17,6 +17,9 @@ fn contains_struct_type(ty: &Type) -> bool {
         Type::Void | Type::Scalar {..} => false,
         Type::Pointer {ty, ..} => contains_struct_type(ty),
         Type::Struct {..} => true,
+        Type::Function {result, args} => {
+            contains_struct_type(result) || args.iter().any(contains_struct_type)
+        },
     }
 }
 
@@ -159,7 +162,6 @@ fn flatten_structs_top(
     mut env: StructEnv, t: Top
 ) -> CompileResult<(StructEnv, Option<Top>)> {
     match t {
-        Top::ExtDecl {..} => Ok((env, Some(t))),
         Top::KernelFunDef {attrs, id, params, body, i} => {
             let (env, params) = expand_kernel_params(env, params)?;
             let body = flatten_structs_kernel_body(&env, body)?;
@@ -186,7 +188,8 @@ fn flatten_structs_top(
                 .collect::<BTreeMap<String, Param>>();
             env.insert(id, renamed_fields);
             Ok((env, None))
-        }
+        },
+        Top::ExtDecl {..} | Top::CallbackDecl {..} => Ok((env, Some(t))),
     }
 }
 

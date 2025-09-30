@@ -29,6 +29,24 @@ fn escape_stmt(s: Stmt) -> Stmt {
     }
 }
 
+fn is_function_pointer_type(ty: &Type) -> bool {
+    match ty {
+        Type::Pointer {ref ty, ..} => match ty.as_ref() {
+            Type::Function {..} => true,
+            _ => false
+        },
+        _ => false
+    }
+}
+
+fn escape_param(p: Param) -> Param {
+    if is_function_pointer_type(&p.ty) {
+        Param {id: escape_name(p.id), ..p}
+    } else {
+        p
+    }
+}
+
 fn escape_top(t: Top) -> Top {
     match t {
         Top::ExtDecl {ret_ty, id, ext_id, params} => {
@@ -36,6 +54,7 @@ fn escape_top(t: Top) -> Top {
             Top::ExtDecl {ret_ty, id, ext_id, params}
         },
         Top::FunDef {dev_attr, ret_ty, attrs, id, params, body} => {
+            let params = params.smap(escape_param);
             let body = body.smap(escape_stmt);
             let id = match &dev_attr {
                 Attribute::Global | Attribute::Device => escape_name(id),

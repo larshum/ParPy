@@ -60,21 +60,44 @@ impl PrettyPrint for Dim {
     }
 }
 
+fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+    let join_space = |fst: String, snd: String, env: PrettyPrintEnv| {
+        if snd.is_empty() {
+            (env, fst)
+        } else {
+            (env, format!("{fst} {snd}"))
+        }
+    };
+    match ty {
+        Type::Void => join_space("void".to_string(), decl, env),
+        Type::Scalar {sz} => {
+            let (env, sz) = sz.pprint(env);
+            join_space(sz, decl, env)
+        },
+        Type::Pointer {ty, mem} => {
+            let (env, mem) = mem.pprint(env);
+            pprint_type(format!("{mem} (*{decl})"), ty, env)
+        },
+        Type::Struct {id, ..} => {
+            let (env, id) = id.pprint(env);
+            join_space(id, decl, env)
+        },
+        Type::Function {result, args} => {
+            let (env, args) = args.iter()
+                .fold((env, vec![]), |(env, mut acc), ty| {
+                    let (env, ty) = pprint_type("".to_string(), ty, env);
+                    acc.push(ty);
+                    (env, acc)
+                });
+            let args = args.into_iter().join(", ");
+            pprint_type(format!("{decl}({args})"), result, env)
+        },
+    }
+}
+
 impl PrettyPrint for Type {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        match self {
-            Type::Void => (env, "void".to_string()),
-            Type::Scalar {sz} => sz.pprint(env),
-            Type::Pointer {ty, mem} => {
-                let (env, ty) = ty.pprint(env);
-                let (env, mem) = mem.pprint(env);
-                (env, format!("{mem} {ty}*"))
-            },
-            Type::Struct {id, ..} => {
-                let (env, id) = id.pprint(env);
-                (env, format!("{id}"))
-            },
-        }
+        pprint_type("".to_string(), self, env)
     }
 }
 
@@ -277,10 +300,10 @@ impl PrettyPrint for Stmt {
         let indent = env.print_indent();
         match self {
             Stmt::Definition {ty, id, expr, ..} => {
-                let (env, ty) = ty.pprint(env);
                 let (env, id) = id.pprint(env);
+                let (env, s) = pprint_type(id, ty, env);
                 let (env, expr) = expr.pprint(env);
-                (env, format!("{indent}{ty} {id} = {expr};"))
+                (env, format!("{indent}{s} = {expr};"))
             },
             Stmt::Assign {dst, expr, ..} => {
                 let (env, dst) = dst.pprint(env);
@@ -393,13 +416,12 @@ impl PrettyPrint for Param {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         let Param {id, ty, ..} = self;
         let (env, id) = id.pprint(env);
-        let restrict_str = if let Type::Pointer {..} = &ty {
-            " __restrict__"
+        let (env, id_ty) = pprint_type(id, ty, env);
+        if let Type::Pointer {..} = &ty {
+            (env, format!("__restrict__ {id_ty}"))
         } else {
-            ""
-        };
-        let (env, ty) = ty.pprint(env);
-        (env, format!("{ty}{restrict_str} {id}"))
+            (env, id_ty)
+        }
     }
 }
 
@@ -461,6 +483,11 @@ impl PrettyPrint for Top {
                 let (env, fields) = pprint_iter(fields.iter(), env, "\n");
                 let env = env.decr_indent();
                 (env, format!("struct {id} {{\n{fields}\n}};"))
+            },
+            Top::CallbackDecl {id, params, i: _} => {
+                let (env, id) = id.pprint(env);
+                let (env, params) = pprint_iter(params.iter(), env, ", ");
+                (env, format!("void {id}({params}) = <callback>;"))
             },
         }
     }
@@ -774,6 +801,48 @@ mod test {
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("[device] void f() {{\n{0}x = y;\n}}", indent);
         assert_eq!(def.pprint_default(), expected);
+    }
+
+    #[test]
+    fn pprint_int16_param() {
+        let p = Param {
+            id: id("x"),
+            ty: Type::Scalar {sz: ElemSize::I16},
+            i: i()
+        };
+        let expected = format!("int16_t x");
+        assert_eq!(p.pprint_default(), expected);
+    }
+
+    #[test]
+    fn pprint_int16_pointer_param() {
+        let p = Param {
+            id: id("x"),
+            ty: Type::Pointer {
+                ty: Box::new(Type::Scalar {sz: ElemSize::I16}),
+                mem: MemSpace::Device
+            },
+            i: i()
+        };
+        let expected = format!("__restrict__ int16_t device (*x)");
+        assert_eq!(p.pprint_default(), expected);
+    }
+
+    #[test]
+    fn pprint_function_pointer_param() {
+        let p = Param {
+            id: id("x"),
+            ty: Type::Pointer {
+                ty: Box::new(Type::Function {
+                    result: Box::new(Type::Void),
+                    args: vec![Type::Scalar {sz: ElemSize::F32}]
+                }),
+                mem: MemSpace::Host
+            },
+            i: i()
+        };
+        let expected = format!("__restrict__ void host (*x)(float)");
+        assert_eq!(p.pprint_default(), expected);
     }
 }
 

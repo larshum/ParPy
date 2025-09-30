@@ -14,27 +14,57 @@ use crate::utils::smap::*;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-fn insert_synchronization_points_stmt(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
-    match s {
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
-        Stmt::Alloc {..} | Stmt::Free {..} => {
-            s.sflatten(acc, insert_synchronization_points_stmt)
+fn collect_host_functions(mut acc: BTreeSet<Name>, t: &Top) -> BTreeSet<Name> {
+    match t {
+        Top::CallbackDecl {id, ..} |
+        Top::ExtDecl {id, target: Target::Host, ..} => {
+            acc.insert(id.clone());
+            acc
         },
+        _ => acc
+    }
+}
+
+fn insert_synchronization_points_stmt(
+    mut acc: Vec<Stmt>,
+    s: Stmt,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    match s {
         Stmt::For {var, lo, hi, step, body, par, i} => {
             let is_par = par.is_parallel();
-            let body = insert_synchronization_points(body);
+            let body = insert_synchronization_points(body, &host_functions);
             acc.push(Stmt::For {var, lo, hi, step, body, par, i: i.clone()});
             if is_par {
                 acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
             }
             acc
         },
+        Stmt::Expr {
+            e: Expr::Call {id, args, par, ty, i: ei}, i
+        } if host_functions.contains(&id) => {
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i: i.clone()});
+            acc.push(Stmt::Expr {e: Expr::Call {id, args, par, ty, i: ei}, i: i.clone()});
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
+            acc
+        },
+        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
+        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
+        Stmt::Alloc {..} | Stmt::Free {..} => {
+            s.sflatten(acc, |acc, s| {
+                insert_synchronization_points_stmt(acc, s, &host_functions)
+            })
+        },
     }
 }
 
-fn insert_synchronization_points(stmts: Vec<Stmt>) -> Vec<Stmt> {
-    stmts.sflatten(vec![], insert_synchronization_points_stmt)
+fn insert_synchronization_points(
+    stmts: Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    stmts.sflatten(vec![], |acc, s| {
+        insert_synchronization_points_stmt(acc, s, &host_functions)
+    })
 }
 
 fn determine_cuda_cluster_size(opts: &option::CompileOptions) -> Option<i64> {
@@ -501,6 +531,7 @@ fn hoist_chunk(
                 // synchronization point is at the end of a chunk. We place each chunk inside the
                 // outer parallel for-loop.
                 let inner_stmts = seq_body.split_inclusive(is_inter_block_sync_point)
+                    .filter(|chunk| !chunk.is_empty())
                     .map(|chunk| {
                         let s = Stmt::For {
                             var: var.clone(),
@@ -1059,6 +1090,49 @@ fn allocate_temporary_data(
         .collect::<Vec<Stmt>>())
 }
 
+fn innermost_body_contains_host_call(
+    body: &Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> bool {
+    match &body[..] {
+        [Stmt::For {body, ..}] => {
+            innermost_body_contains_host_call(body, &host_functions)
+        }
+        [Stmt::Expr {e: Expr::Call {id, ..}, ..}] => {
+            host_functions.contains(id)
+        },
+        _ => false,
+    }
+}
+
+fn remove_parallelism_of_host_loop_nests_stmt(
+    s: Stmt,
+    host_functions: &BTreeSet<Name>
+) -> Stmt {
+    match s {
+        Stmt::For {var, lo, hi, step, body, par, i} if par.is_parallel() => {
+            let par = if innermost_body_contains_host_call(&body, &host_functions) {
+                LoopPar::default()
+            } else {
+                par
+            };
+            let body = remove_parallelism_of_host_loop_nests(body, &host_functions);
+            Stmt::For {var, lo, hi, step, body, par, i}
+        },
+        _ => s.smap(|s| remove_parallelism_of_host_loop_nests_stmt(s, &host_functions))
+    }
+}
+
+/// Removes the parallelism of loop nests whose innermost workload consists of a statement that
+/// should run on the host. This can either be an external function that is declared to run on the
+/// host, or a callback function (which run in Python code on the host).
+fn remove_parallelism_of_host_loop_nests(
+    body: Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    body.smap(|s| remove_parallelism_of_host_loop_nests_stmt(s, &host_functions))
+}
+
 /// Restructure the code such that inter-block synchronizations are eliminated from the code. In
 /// particular, we identify the synchronization points within parallel code and classify them based
 /// on whether they require inter-block synchronization. Parallel reductions requiring inter-block
@@ -1082,9 +1156,11 @@ pub fn restructure_inter_block_synchronization(
     // The others are assumed to contain no parallelism.
     let FunDef {id, params, body, res_ty, i} = ast.main;
 
+    let host_functions = ast.tops.sfold(BTreeSet::new(), collect_host_functions);
+
     // Insert a synchronization point at the end of each parallel for-loop, and determine for each
     // of them whether they require inter-block synchronization.
-    let body = insert_synchronization_points(body);
+    let body = insert_synchronization_points(body, &host_functions);
     let par = par_tree::build_tree(&body);
     let body = classify_synchronization_points(&par, opts, body);
 
@@ -1118,6 +1194,10 @@ pub fn restructure_inter_block_synchronization(
     // After the above transformations, we may end up with repeated use of a parallel for-loop. To
     // make sure later transformations work as expected, we need to re-symbolize loop variables.
     let body = resymbolize_duplicated_loops(body);
+
+    // Removes the parallelism of loop nests that contain calls to host code. This includes a call
+    // to a host external or a callback function.
+    let body = remove_parallelism_of_host_loop_nests(body, &host_functions);
 
     Ok(Ast {main: FunDef {id, params, body, res_ty, i}, ..ast})
 }
@@ -1293,7 +1373,7 @@ mod test {
     }
 
     fn assert_sync(body: Vec<Stmt>, expected: Vec<Stmt>) {
-        let body = insert_synchronization_points(body);
+        let body = insert_synchronization_points(body, &BTreeSet::new());
         print_stmts(&body, &expected);
         assert_eq!(body, expected);
     }

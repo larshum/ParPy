@@ -109,7 +109,7 @@ fn fold_def(def: FunDef) -> FunDef {
 fn fold_top(t: Top) -> Top {
     match t {
         Top::FunDef {v} => Top::FunDef {v: fold_def(v)},
-        Top::StructDef {..} | Top::ExtDecl {..} => t,
+        Top::CallbackDecl {..} | Top::StructDef {..} | Top::ExtDecl {..} => t,
     }
 }
 

@@ -6,7 +6,7 @@ use crate::utils::smap::*;
 fn validate_gpu_memory_access_expr(acc: (), e: &Expr) -> CompileResult<()> {
     match e {
         Expr::ArrayAccess {i, ..} => {
-            parpy_compile_error!(i, "Assignments are not allowed outside parallel code.")
+            parpy_compile_error!(i, "Data cannot be accessed outside parallel code.")
         },
         _ => e.sfold_result(Ok(acc), validate_gpu_memory_access_expr)
     }
@@ -67,7 +67,7 @@ mod test {
             ret_ty: Type::Void, id: id("f"), params: vec![],
             body: vec![assign_stmt()], target: Target::Host, i: i()
         }];
-        assert_error_matches(validate_gpu_memory_access(&ast), "not allowed outside parallel");
+        assert_error_matches(validate_gpu_memory_access(&ast), "cannot be accessed outside parallel");
     }
 
     #[test]

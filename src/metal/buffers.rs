@@ -159,7 +159,7 @@ fn transform_scalars_to_buffers_top(t: Top) -> Top {
             Top::FunDef {ret_ty, id, params, body, target: Target::Host, i}
         },
         Top::FunDef {target: Target::Device, ..} | Top::ExtDecl {..} |
-        Top::StructDef {..} => t,
+        Top::StructDef {..} | Top::CallbackDecl {..} => t,
     }
 }
 

@@ -591,6 +591,10 @@ fn from_ir_top(
             env.struct_fields.insert(id.clone(), fields.clone());
             Ok((env, Top::StructDef {id, fields, i}))
         },
+        ir_ast::Top::CallbackDecl {id, params, i} => {
+            let params = from_ir_params(params);
+            Ok((env, Top::CallbackDecl {id, params, i}))
+        },
         ir_ast::Top::ExtDecl {id, ext_id, params, res_ty, target, header, i} => {
             let params = from_ir_params(params);
             let ret_ty = from_ir_type(res_ty);

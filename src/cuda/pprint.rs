@@ -4,25 +4,48 @@ use crate::utils::pprint::*;
 
 use itertools::Itertools;
 
+fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+    let join_space = |fst: String, snd: String, env: PrettyPrintEnv| {
+        if snd.is_empty() {
+            (env, fst)
+        } else {
+            (env, format!("{fst} {snd}"))
+        }
+    };
+    match ty {
+        Type::Void => join_space("void".to_string(), decl, env),
+        Type::Scalar {sz} => {
+            let (env, sz) = sz.pprint(env);
+            join_space(sz, decl, env)
+        },
+        Type::Pointer {ty} => pprint_type(format!("(*{decl})"), ty, env),
+        Type::Struct {id, ..} => {
+            let (env, id) = id.pprint(env);
+            join_space(id, decl, env)
+        },
+        Type::Function {result, args} => {
+            let (env, args) = args.iter()
+                .fold((env, vec![]), |(env, mut acc), ty| {
+                    let (env, ty) = pprint_type("".to_string(), ty, env);
+                    acc.push(ty);
+                    (env, acc)
+                });
+            let args = args.into_iter().join(", ");
+            pprint_type(format!("{decl}({args})"), result, env)
+        },
+        Type::Error => join_space(format!("cudaError_t"), decl, env),
+        Type::Stream => join_space(format!("cudaStream_t"), decl, env),
+        Type::Graph => join_space(format!("cudaGraph_t"), decl, env),
+        Type::GraphExec => join_space(format!("cudaGraphExec_t"), decl, env),
+        Type::GraphExecUpdateResultInfo => {
+            join_space(format!("cudaGraphExecUpdateResultInfo"), decl, env)
+        },
+    }
+}
+
 impl PrettyPrint for Type {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        match self {
-            Type::Void => (env, "void".to_string()),
-            Type::Scalar {sz} => sz.pprint(env),
-            Type::Pointer {ty} => {
-                let (env, ty) = ty.pprint(env);
-                (env, format!("{ty}*"))
-            },
-            Type::Struct {id, ..} => {
-                let (env, id) = id.pprint(env);
-                (env, format!("{id}"))
-            },
-            Type::Error => (env, format!("cudaError_t")),
-            Type::Stream => (env, format!("cudaStream_t")),
-            Type::Graph => (env, format!("cudaGraph_t")),
-            Type::GraphExec => (env, format!("cudaGraphExec_t")),
-            Type::GraphExecUpdateResultInfo => (env, format!("cudaGraphExecUpdateResultInfo"))
-        }
+        pprint_type("".to_string(), self, env)
     }
 }
 
@@ -341,14 +364,14 @@ impl PrettyPrint for Stmt {
         let indent = env.print_indent();
         match self {
             Stmt::Definition {ty, id, expr} => {
-                let (env, ty) = ty.pprint(env);
                 let (env, id) = id.pprint(env);
+                let (env, s) = pprint_type(id, ty, env);
                 match expr {
                     Some(e) => {
                         let (env, e) = e.pprint(env);
-                        (env, format!("{indent}{ty} {id} = {e};"))
+                        (env, format!("{indent}{s} = {e};"))
                     },
-                    None => (env, format!("{indent}{ty} {id};"))
+                    None => (env, format!("{indent}{s};"))
                 }
             },
             Stmt::Assign {dst, expr} => {
@@ -430,9 +453,9 @@ impl PrettyPrint for Attribute {
 impl PrettyPrint for Field {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         let Field {id, ty} = self;
-        let (env, ty) = ty.pprint(env);
+        let (env, s) = pprint_type(id.to_string(), ty, env);
         let indent = env.print_indent();
-        (env, format!("{indent}{ty} {id};"))
+        (env, format!("{indent}{s};"))
     }
 }
 
@@ -440,13 +463,17 @@ impl PrettyPrint for Param {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         let Param {id, ty} = self;
         let (env, id) = id.pprint(env);
-        let restrict_str = if let Type::Pointer {..} = &ty {
-            " __restrict__"
-        } else {
-            ""
+        // Add the restrict annotation to all pointers to non-function types.
+        let decl = match ty {
+            Type::Pointer {ty, ..} => {
+                match ty.as_ref() {
+                    Type::Function {..} => id,
+                    _ => format!("__restrict__ {id}")
+                }
+            },
+            _ => id
         };
-        let (env, ty) = ty.pprint(env);
-        (env, format!("{ty}{restrict_str} {id}"))
+        pprint_type(decl, ty, env)
     }
 }
 
@@ -865,7 +892,7 @@ mod test {
     fn print_pointer_param() {
         let ty = Type::Pointer{ty: Box::new(scalar(ElemSize::F16))};
         let p = Param {id: id("x"), ty};
-        assert_eq!(p.pprint_default(), "half* __restrict__ x");
+        assert_eq!(p.pprint_default(), "half (*__restrict__ x)");
     }
 
     #[test]

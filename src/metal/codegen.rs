@@ -68,11 +68,18 @@ fn from_gpu_ir_type(env: &CodegenEnv, ty: gpu_ast::Type, i: &Info) -> CompileRes
             if env.on_device {
                 Ok(Type::Pointer {ty, mem})
             } else {
-                Ok(Type::Buffer)
+                Ok(Type::MTLBuffer)
             }
         },
         gpu_ast::Type::Struct {id} => {
             parpy_internal_error!(i, "Found struct type {id} in the Metal backend.")
+        },
+        gpu_ast::Type::Function {result, args} => {
+            let result = Box::new(from_gpu_ir_type(&env, *result, &i)?);
+            let args = args.into_iter()
+                .map(|arg| from_gpu_ir_type(&env, arg, &i))
+                .collect::<CompileResult<Vec<Type>>>()?;
+            Ok(Type::Function {result, args})
         }
     }
 }
@@ -347,11 +354,16 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             };
             Ok(acc)
         },
-        gpu_ast::Top::StructDef {id, ..} => {
-            parpy_internal_error!(Info::default(), "Found struct definition {id} \
-                                                      in the Metal backend, where \
-                                                      structs are not supported.")
+        gpu_ast::Top::StructDef {id, i, ..} => {
+            parpy_internal_error!(i, "Found struct definition {id} in the \
+                                      Metal codegen, which does not support \
+                                      struct types.")
         }
+        gpu_ast::Top::CallbackDecl {id, i, ..} => {
+            parpy_internal_error!(i, "Found callback declaration {id} in the \
+                                      Metal codegen, where it should have \
+                                      already been eliminated.")
+        },
     }
 }
 
@@ -436,11 +448,11 @@ fn add_grid_index_arguments_to_kernels(mut tops: TopsAcc) -> TopsAcc {
 fn add_top_kernel_def(mut acc: Vec<Top>, t: &Top, lib_id: &Name) -> Vec<Top> {
     if let Top::FunDef {is_kernel: true, id, ..} = t {
         let get_fun_expr = Expr::GetFun {
-            lib: lib_id.clone(), fun_id: id.clone(), ty: Type::Function,
+            lib: lib_id.clone(), fun_id: id.clone(), ty: Type::MTLFunction,
             i: Info::default()
         };
         acc.push(Top::VarDef {
-            ty: Type::Function, id: id.clone(), init: Some(get_fun_expr)
+            ty: Type::MTLFunction, id: id.clone(), init: Some(get_fun_expr)
         });
     }
     acc
@@ -452,8 +464,8 @@ fn add_top_kernel_defs(acc: Vec<Top>, tops: &Vec<Top>, lib_id: &Name) -> Vec<Top
 
 fn generate_kernel_library_top(lib_id: Name, tops: Vec<Top>) -> Top {
     Top::VarDef {
-        ty: Type::Library, id: lib_id,
-        init: Some(Expr::LoadLibrary {tops, ty: Type::Library, i: Info::default()})
+        ty: Type::MTLLibrary, id: lib_id,
+        init: Some(Expr::LoadLibrary {tops, ty: Type::MTLLibrary, i: Info::default()})
     }
 }
 
@@ -521,7 +533,7 @@ mod test {
     fn from_1d_pointer_host() {
         let ty = gpu::pointer(gpu::scalar(ElemSize::F32), gpu_ast::MemSpace::Device);
         let env = mk_host_env();
-        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::Buffer);
+        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::MTLBuffer);
     }
 
     #[test]
@@ -548,7 +560,7 @@ mod test {
         );
         let env = mk_host_env();
         let expected = Expr::HostArrayAccess {
-            target: Box::new(var("x", Type::Buffer)),
+            target: Box::new(var("x", Type::MTLBuffer)),
             idx: Box::new(int(0, ElemSize::I32)),
             ty: scalar(ElemSize::F32),
             i: i()
@@ -605,7 +617,7 @@ mod test {
         let ty = gpu::pointer(gpu::scalar(ElemSize::I32), gpu_ast::MemSpace::Device);
         let p = gpu_ast::Param {id: id("x"), ty, i: i()};
         let expected = Param {
-            id: id("x"), ty: Type::Buffer,
+            id: id("x"), ty: Type::MTLBuffer,
             attr: Some(ParamAttribute::Buffer {idx: 1})
         };
         assert_eq!(from_gpu_ir_param(&env, p, Some(1)), Ok(expected));

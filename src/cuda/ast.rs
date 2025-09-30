@@ -16,6 +16,7 @@ pub enum Type {
     Scalar {sz: ElemSize},
     Pointer {ty: Box<Type>},
     Struct {id: Name},
+    Function {result: Box<Type>, args: Vec<Type>},
 
     // CUDA-specific types
     Error,

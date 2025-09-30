@@ -28,6 +28,7 @@ pub enum Type {
     Scalar {sz: ElemSize},
     Pointer {ty: Box<Type>, mem: MemSpace},
     Struct {id: Name},
+    Function {result: Box<Type>, args: Vec<Type>},
 }
 
 impl Type {
@@ -604,6 +605,7 @@ pub enum Top {
         i: Info
     },
     StructDef {id: Name, fields: Vec<Field>, i: Info},
+    CallbackDecl {id: Name, params: Vec<Param>, i: Info},
 }
 
 impl SMapAccum<Stmt> for Top {
@@ -621,7 +623,9 @@ impl SMapAccum<Stmt> for Top {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Top::FunDef {ret_ty, id, params, body, target, i}))
             },
-            Top::ExtDecl {..} | Top::StructDef {..} => Ok((acc?, self))
+            Top::ExtDecl {..} | Top::CallbackDecl {..} | Top::StructDef {..} => {
+                Ok((acc?, self))
+            }
         }
     }
 }

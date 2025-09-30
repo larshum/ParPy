@@ -18,6 +18,13 @@ fn from_gpu_ir_type(ty: gpu_ast::Type) -> Type {
             Type::Pointer {ty: Box::new(from_gpu_ir_type(*ty))}
         },
         gpu_ast::Type::Struct {id} => Type::Struct {id},
+        gpu_ast::Type::Function {result, args} => {
+            let result = Box::new(from_gpu_ir_type(*result));
+            let args = args.into_iter()
+                .map(from_gpu_ir_type)
+                .collect::<Vec<Type>>();
+            Type::Function {result, args}
+        }
     }
 }
 
@@ -288,6 +295,11 @@ fn from_gpu_ir_top(
                 .collect::<Vec<Field>>();
             tops.push(Top::StructDef {id, fields});
         },
+        gpu_ast::Top::CallbackDecl {id, i, ..} => {
+            parpy_internal_error!(i, "Found callback declaration {id} in the \
+                                      CUDA codegen, where it should have \
+                                      already been eliminated.")?
+        },
     };
     Ok((includes, tops))
 }
@@ -296,6 +308,10 @@ fn type_contains_16_bit_floats(acc: bool, ty: &gpu_ast::Type) -> bool {
     match ty {
         gpu_ast::Type::Scalar {sz: ElemSize::F16} => true,
         gpu_ast::Type::Pointer {ty, ..} => type_contains_16_bit_floats(acc, ty),
+        gpu_ast::Type::Function {result, args} => {
+            let acc = type_contains_16_bit_floats(acc, result);
+            args.sfold(acc, type_contains_16_bit_floats)
+        },
         gpu_ast::Type::Void |
         gpu_ast::Type::Scalar {..} |
         gpu_ast::Type::Struct {..} => acc,
