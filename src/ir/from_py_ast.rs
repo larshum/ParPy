@@ -239,14 +239,15 @@ fn to_ir_expr(
                             let target = Box::new(target);
                             Ok(Expr::TensorAccess {target, idx, ty: res_ty, i})
                         } else {
-                            let ty = Type::Tensor {sz: sz.clone(), shape: vec![]};
                             let res_ty = Type::Tensor {sz: sz.clone(), shape: res_shape};
-                            Ok(Expr::UnOp {
-                                op: UnOp::Addressof,
-                                arg: Box::new(Expr::TensorAccess {
-                                    target: Box::new(target), idx, ty, i: i.clone()
-                                }),
-                                ty: res_ty, i
+                            // Convert the subscript to use pointer arithmetic, as the result
+                            // should still be a pointer type.
+                            Ok(Expr::BinOp {
+                                lhs: Box::new(target),
+                                op: BinOp::Add,
+                                rhs: idx,
+                                ty: res_ty,
+                                i
                             })
                         }
                     } else {
