@@ -8,21 +8,11 @@ mod pprint;
 mod ast_builder;
 
 use ast::*;
-use crate::ir::ast as ir_ast;
-use crate::gpu;
-use crate::option;
+use crate::gpu::ast as gpu_ast;
 use crate::gpu::flatten_structs;
-use crate::utils::debug::*;
 use crate::utils::err::*;
 
-pub fn codegen(
-    ir_ast: ir_ast::Ast,
-    opts: &option::CompileOptions,
-    debug_env: &DebugEnv
-) -> CompileResult<Ast> {
-    // Convert the IR AST to a general GPU AST.
-    let gpu_ast = gpu::from_general_ir(ir_ast, opts, debug_env)?;
-
+pub fn codegen(gpu_ast: gpu_ast::Ast) -> CompileResult<Ast> {
     // Flatten struct types by replacing them by the individual fields, as the Metal backend does
     // not support the use of structs.
     let gpu_ast = flatten_structs::flatten_structs(gpu_ast)?;

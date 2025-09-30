@@ -107,17 +107,24 @@ fn compile_ir<'py>(
     let ir_ast = ir::from_python(py_ast, &opts, &debug_env)?;
     debug_env.print("IR AST", &ir_ast);
 
+    // Convert the IR AST to a GPU AST. The main difference between these two ASTs is that the GPU
+    // AST distinguishes between code running on the host (CPU) and on the device (GPU). Further,
+    // it includes constructs exclusive to GPU programming, such as thread and block indexing and
+    // statements representing the allocation of shared memory.
+    let gpu_ast = gpu::from_general_ir(ir_ast, &opts, &debug_env)?;
+    debug_env.print("GPU AST", &gpu_ast);
+
     // Compile using the backend-specific approach to code generation. In the end, we pretty-print
     // the AST with and without symbols. The latter is used as a key to the cache - if only the
     // symbols differ between two ASTs, they should be considered equivalent.
     match opts.backend {
         option::CompileBackend::Cuda => {
-            let ast = cuda::codegen(ir_ast, &opts, &debug_env)?;
+            let ast = cuda::codegen(gpu_ast, &opts)?;
             debug_env.print("CUDA AST", &ast);
             Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
         },
         option::CompileBackend::Metal => {
-            let ast = metal::codegen(ir_ast, &opts, &debug_env)?;
+            let ast = metal::codegen(gpu_ast)?;
             debug_env.print("Metal AST", &ast);
             Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
         },
