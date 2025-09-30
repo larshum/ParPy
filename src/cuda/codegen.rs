@@ -248,7 +248,7 @@ fn from_gpu_ir_top(
 ) -> CompileResult<(Vec<Top>, Vec<Top>)> {
     let (mut includes, mut tops) = acc?;
     match t {
-        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, header, target: _} => {
+        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, header, target: _, i: _} => {
             let ret_ty = from_gpu_ir_type(ret_ty);
             let params = from_gpu_ir_params(params);
             if let Some(h) = header {
@@ -256,7 +256,7 @@ fn from_gpu_ir_top(
             };
             tops.push(Top::ExtDecl {ret_ty, id, ext_id, params});
         },
-        gpu_ast::Top::KernelFunDef {attrs, id, params, body} => {
+        gpu_ast::Top::KernelFunDef {attrs, id, params, body, i: _} => {
             let attrs = attrs.into_iter()
                 .map(from_gpu_ir_attr)
                 .collect::<Vec<KernelAttribute>>();
@@ -269,7 +269,7 @@ fn from_gpu_ir_top(
                 attrs, id, params, body
             });
         },
-        gpu_ast::Top::FunDef {ret_ty, id, params, body, target} => {
+        gpu_ast::Top::FunDef {ret_ty, id, params, body, target, i: _} => {
             let ret_ty = from_gpu_ir_type(ret_ty);
             let params = from_gpu_ir_params(params);
             let body = from_gpu_ir_stmts(body)?;
@@ -282,7 +282,7 @@ fn from_gpu_ir_top(
                 id, params, body
             });
         },
-        gpu_ast::Top::StructDef {id, fields} => {
+        gpu_ast::Top::StructDef {id, fields, i: _} => {
             let fields = fields.into_iter()
                 .map(from_gpu_ir_field)
                 .collect::<Vec<Field>>();
@@ -366,6 +366,7 @@ mod test {
     use crate::cuda::ast_builder::*;
     use crate::gpu::ast_builder as gpu;
     use crate::option::CompileOptions;
+    use crate::test::*;
 
     #[test]
     fn scalar_type_contains_16bit_float_fails() {
@@ -401,7 +402,7 @@ mod test {
         vec![
             gpu_ast::Top::FunDef {
                 ret_ty: gpu_ast::Type::Void, id: id("f"), params: vec![],
-                body, target: gpu_ast::Target::Host
+                body, target: gpu_ast::Target::Host, i: i()
             }
         ]
     }

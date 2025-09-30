@@ -593,11 +593,17 @@ pub enum KernelAttribute {
 pub enum Top {
     ExtDecl {
         ret_ty: Type, id: Name, ext_id: String, params: Vec<Param>, target: Target,
-        header: Option<String>
+        header: Option<String>, i: Info
     },
-    KernelFunDef {attrs: Vec<KernelAttribute>, id: Name, params: Vec<Param>, body: Vec<Stmt>},
-    FunDef {ret_ty: Type, id: Name, params: Vec<Param>, body: Vec<Stmt>, target: Target},
-    StructDef {id: Name, fields: Vec<Field>},
+    KernelFunDef {
+        attrs: Vec<KernelAttribute>, id: Name, params: Vec<Param>, body: Vec<Stmt>,
+        i: Info
+    },
+    FunDef {
+        ret_ty: Type, id: Name, params: Vec<Param>, body: Vec<Stmt>, target: Target,
+        i: Info
+    },
+    StructDef {id: Name, fields: Vec<Field>, i: Info},
 }
 
 impl SMapAccum<Stmt> for Top {
@@ -607,13 +613,13 @@ impl SMapAccum<Stmt> for Top {
         f: impl Fn(A, Stmt) -> Result<(A, Stmt), E>
     ) -> Result<(A, Self), E> {
         match self {
-            Top::KernelFunDef {attrs, id, params, body} => {
+            Top::KernelFunDef {attrs, id, params, body, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Top::KernelFunDef {attrs, id, params, body}))
+                Ok((acc, Top::KernelFunDef {attrs, id, params, body, i}))
             },
-            Top::FunDef {ret_ty, id, params, body, target} => {
+            Top::FunDef {ret_ty, id, params, body, target, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Top::FunDef {ret_ty, id, params, body, target}))
+                Ok((acc, Top::FunDef {ret_ty, id, params, body, target, i}))
             },
             Top::ExtDecl {..} | Top::StructDef {..} => Ok((acc?, self))
         }

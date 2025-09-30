@@ -464,9 +464,9 @@ fn expand_parallel_reductions_top(
     t: Top
 ) -> CompileResult<Top> {
     match t {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = expand_parallel_reductions_stmts(opts, body)?;
-            Ok(Top::KernelFunDef {attrs, id, params, body})
+            Ok(Top::KernelFunDef {attrs, id, params, body, i})
         },
         _ => Ok(t)
     }

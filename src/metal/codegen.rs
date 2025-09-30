@@ -301,7 +301,7 @@ fn from_gpu_ir_attr(
 
 fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc> {
     match top {
-        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, target, header} => {
+        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, target, header, i: _} => {
             let env = CodegenEnv::new(&target);
             let ret_ty = from_gpu_ir_type(&env, ret_ty, &Info::default())?;
             let params = from_gpu_ir_params(&env, params, false)?;
@@ -315,7 +315,7 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             dst.push(Top::ExtDecl {ret_ty, id, ext_id, params});
             Ok(acc)
         },
-        gpu_ast::Top::KernelFunDef {attrs, id, params, body} => {
+        gpu_ast::Top::KernelFunDef {attrs, id, params, body, i: _} => {
             let env = CodegenEnv::new(&gpu_ast::Target::Device);
             let attrs = attrs.into_iter()
                 .map(from_gpu_ir_attr)
@@ -327,7 +327,7 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             });
             Ok(acc)
         },
-        gpu_ast::Top::FunDef {ret_ty, id, params, body, target} => {
+        gpu_ast::Top::FunDef {ret_ty, id, params, body, target, i: _} => {
             let env = CodegenEnv::new(&target);
             let ret_ty = from_gpu_ir_type(&env, ret_ty, &Info::default())?;
             let params = from_gpu_ir_params(&env, params, false)?;

@@ -160,12 +160,12 @@ fn flatten_structs_top(
 ) -> CompileResult<(StructEnv, Option<Top>)> {
     match t {
         Top::ExtDecl {..} => Ok((env, Some(t))),
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let (env, params) = expand_kernel_params(env, params)?;
             let body = flatten_structs_kernel_body(&env, body)?;
-            Ok((env, Some(Top::KernelFunDef {attrs, id, params, body})))
+            Ok((env, Some(Top::KernelFunDef {attrs, id, params, body, i})))
         },
-        Top::FunDef {ret_ty, id, params, body, target} => {
+        Top::FunDef {ret_ty, id, params, body, target, i} => {
             validate_return_type(&id, &ret_ty)?;
             // NOTE: Currently, we only support simple scalar types as arguments to user-defined
             // functions (these will have a device target). Therefore, we do not need to flatten
@@ -175,9 +175,9 @@ fn flatten_structs_top(
             } else {
                 body
             };
-            Ok((env, Some(Top::FunDef {ret_ty, id, params, body, target})))
+            Ok((env, Some(Top::FunDef {ret_ty, id, params, body, target, i})))
         },
-        Top::StructDef {id, fields} => {
+        Top::StructDef {id, fields, i: _} => {
             let renamed_fields = fields.into_iter()
                 .map(|Field {id: fid, ty, i}| {
                     let pid = Name::new(format!("{0}_{1}", id.get_str(), fid));

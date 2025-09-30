@@ -20,7 +20,7 @@ fn remove_redundant_synchronization_stmts(stmts: Vec<Stmt>) -> Vec<Stmt> {
 
 fn remove_redundant_synchronization_top(t: Top) -> Top {
     match t {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let mut body = remove_redundant_synchronization_stmts(body);
             match body.last() {
                 Some(Stmt::Synchronize {scope: SyncScope::Block, ..}) => {
@@ -28,7 +28,7 @@ fn remove_redundant_synchronization_top(t: Top) -> Top {
                 },
                 _ => ()
             };
-            Top::KernelFunDef {attrs, id, params, body}
+            Top::KernelFunDef {attrs, id, params, body, i}
         },
         _ => t
     }

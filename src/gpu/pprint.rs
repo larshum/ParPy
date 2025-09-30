@@ -427,7 +427,7 @@ impl PrettyPrint for KernelAttribute {
 impl PrettyPrint for Top {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         match self {
-            Top::ExtDecl {ret_ty, id, ext_id, params, target, header} => {
+            Top::ExtDecl {ret_ty, id, ext_id, params, target, header, i: _} => {
                 let (env, id) = id.pprint(env);
                 let (env, ret_ty) = ret_ty.pprint(env);
                 let (env, params) = pprint_iter(params.iter(), env, ", ");
@@ -436,7 +436,7 @@ impl PrettyPrint for Top {
                 (env, format!("extern {ret_ty} {id}({params}) = {ext_id}; \
                                // {target} {header_str}"))
             },
-            Top::KernelFunDef {attrs, id, params, body} => {
+            Top::KernelFunDef {attrs, id, params, body, i: _} => {
                 let (env, attrs) = pprint_iter(attrs.iter(), env, "\n");
                 let (env, id) = id.pprint(env);
                 let (env, params) = pprint_iter(params.iter(), env, ", ");
@@ -445,7 +445,7 @@ impl PrettyPrint for Top {
                 let env = env.decr_indent();
                 (env, format!("{attrs}\nvoid {id}({params}) {{\n{body}\n}}"))
             },
-            Top::FunDef {ret_ty, id, params, body, target} => {
+            Top::FunDef {ret_ty, id, params, body, target, i: _} => {
                 let (env, ret_ty) = ret_ty.pprint(env);
                 let (env, id) = id.pprint(env);
                 let (env, params) = pprint_iter(params.iter(), env, ", ");
@@ -455,7 +455,7 @@ impl PrettyPrint for Top {
                 let (env, target) = target.pprint(env);
                 (env, format!("[{target}] {ret_ty} {id}({params}) {{\n{body}\n}}"))
             },
-            Top::StructDef {id, fields} => {
+            Top::StructDef {id, fields, i: _} => {
                 let (env, id) = id.pprint(env);
                 let env = env.incr_indent();
                 let (env, fields) = pprint_iter(fields.iter(), env, "\n");
@@ -738,7 +738,8 @@ mod test {
             attrs: vec![KernelAttribute::LaunchBounds {threads: 1024}],
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}]
+            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("threads(1024)\nvoid f() {{\n{0}x = y;\n}}", indent);
@@ -752,7 +753,8 @@ mod test {
             id: Name::new("f".to_string()),
             params: vec![],
             body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
-            target: Target::Host
+            target: Target::Host,
+            i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("[host] void f() {{\n{0}x = y;\n}}", indent);
@@ -766,7 +768,8 @@ mod test {
             id: Name::new("f".to_string()),
             params: vec![],
             body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
-            target: Target::Device
+            target: Target::Device,
+            i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("[device] void f() {{\n{0}x = y;\n}}", indent);

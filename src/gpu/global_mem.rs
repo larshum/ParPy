@@ -179,9 +179,9 @@ fn transform_thread_independent_memory_writes_top(
     vars: &BTreeSet<Name>
 ) -> Top {
     match top {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = transform_thread_independent_memory_writes_stmts(body, vars);
-            Top::KernelFunDef {attrs, id, params, body}
+            Top::KernelFunDef {attrs, id, params, body, i}
         },
         Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => top,
     }

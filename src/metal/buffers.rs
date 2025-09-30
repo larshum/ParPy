@@ -148,15 +148,15 @@ fn update_use_of_converted_scalar_params_stmt(conv: &BTreeSet<Name>, s: Stmt) ->
 
 fn transform_scalars_to_buffers_top(t: Top) -> Top {
     match t {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let (conv, params) = params.smap_accum_l(vec![], convert_scalar_param_to_pointer);
             let conv = conv.into_iter().collect::<BTreeSet<Name>>();
             let body = body.smap(|s| update_use_of_converted_scalar_params_stmt(&conv, s));
-            Top::KernelFunDef {attrs, id, params, body}
+            Top::KernelFunDef {attrs, id, params, body, i}
         },
-        Top::FunDef {ret_ty, id, params, body, target: Target::Host} => {
+        Top::FunDef {ret_ty, id, params, body, target: Target::Host, i} => {
             let body = insert_temporary_buffers_host_body(body);
-            Top::FunDef {ret_ty, id, params, body, target: Target::Host}
+            Top::FunDef {ret_ty, id, params, body, target: Target::Host, i}
         },
         Top::FunDef {target: Target::Device, ..} | Top::ExtDecl {..} |
         Top::StructDef {..} => t,

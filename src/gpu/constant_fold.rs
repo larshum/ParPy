@@ -210,13 +210,13 @@ fn fold_stmts(stmts: Vec<Stmt>) -> Vec<Stmt> {
 
 fn fold_top(top: Top) -> Top {
     match top {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = fold_stmts(body);
-            Top::KernelFunDef {attrs, id, params, body}
+            Top::KernelFunDef {attrs, id, params, body, i}
         },
-        Top::FunDef {ret_ty, id, params, body, target} => {
+        Top::FunDef {ret_ty, id, params, body, target, i} => {
             let body = fold_stmts(body);
-            Top::FunDef {ret_ty, id, params, body, target}
+            Top::FunDef {ret_ty, id, params, body, target, i}
         },
         Top::ExtDecl {..} | Top::StructDef {..} => top
     }
