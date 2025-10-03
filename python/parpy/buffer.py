@@ -69,6 +69,16 @@ def _alloc_data(shape, dtype, lib):
     nbytes = _size(shape, dtype)
     return _check_not_nullptr(lib, lib.parpy_alloc_buffer(nbytes))
 
+def _from_raw(ptr, shape, dtype, backend):
+    if backend is None:
+        return DummyBuffer(ptr, shape, dtype)
+    elif backend == CompileBackend.Cuda:
+        return CudaBuffer(ptr, shape, dtype, raw=True)
+    elif backend == CompileBackend.Metal:
+        raise ValueError(f"Cannot construct Metal buffer from raw data")
+    else:
+        raise ValueError(f"Cannot convert raw data to buffer of unknown backend {backend}")
+
 def sync(backend):
     """
     Synchronizes the CPU and the target device by waiting until all running
@@ -228,11 +238,15 @@ class DummyBuffer(Buffer):
             raise ValueError(f"Found unsupported data type: {type(new_dtype)}")
 
 class CudaBuffer(Buffer):
-    def __init__(self, buf, shape, dtype, src=None, refcount=None):
+    def __init__(self, buf, shape, dtype, src=None, refcount=None, raw=False):
         super().__init__(buf, shape, dtype, src, refcount)
-        self.__cuda_array_interface__ = buf.__cuda_array_interface__
+        self.raw = raw
         self.backend = CompileBackend.Cuda
         self.lib = _compile_runtime_lib(self.backend)
+        if self.raw:
+            self.__cuda_array_interface__ = _to_array_interface(self.buf, self.dtype, self.shape)
+        else:
+            self.__cuda_array_interface__ = buf.__cuda_array_interface__
 
     def _deconstruct(self, src_ptr):
         if src_ptr is not None:
@@ -263,12 +277,33 @@ class CudaBuffer(Buffer):
         _, _, ptr = _extract_array_interface(self.buf, allow_cuda=True)
         return ptr
 
+    def _raw_idx(self, *indices):
+        import math
+        if self.raw:
+            if len(indices) < len(self.shape):
+                new_buf = self.buf
+                for i, idx in enumerate(indices):
+                    new_buf += idx * math.prod(self.shape[i+1:]) * self.dtype.size()
+                return CudaBuffer(
+                    new_buf, self.shape[len(indices):], self.dtype, raw=True
+                )
+            elif len(indices) == len(self.shape):
+                return self.torch()[indices]
+            else:
+                raise RuntimeError(f"Invalid index {indices} into buffer of shape {self.shape}")
+        else:
+            raise RuntimeError(f"Cannot index into non-raw tensor")
+
     def numpy(self):
         import numpy as np
         return np.asarray(self.buf.cpu())
 
     def torch(self):
-        return self.buf
+        if self.raw:
+            import torch
+            return torch.as_tensor(self)
+        else:
+            return self.buf
 
     def copy(self):
         data = self.buf.detach().clone()
@@ -283,7 +318,7 @@ class CudaBuffer(Buffer):
         new_dtype = _resolve_dtype(new_dtype)
         if isinstance(new_dtype, DataType):
             if self.dtype.size() == new_dtype.size():
-                return CudaBuffer(self.buf, self.shape, new_dtype, self.src, self.refcount)
+                return CudaBuffer(self.buf, self.shape, new_dtype, self.src, self.refcount, self.raw)
             else:
                 t = self.buf.detach().clone().to(new_dtype.to_torch())
                 return CudaBuffer(t, self.shape, new_dtype)
@@ -296,8 +331,7 @@ class MetalBuffer(Buffer):
         self.backend = CompileBackend.Metal
         self.lib = _compile_runtime_lib(self.backend)
         ptr = self.lib.parpy_ptr_buffer(self.buf)
-        arr_intf = _to_array_interface(ptr, self.dtype, self.shape)
-        self.__array_interface__ = arr_intf
+        self.__array_interface__ = _to_array_interface(ptr, self.dtype, self.shape)
 
     def _deconstruct(self, src_ptr):
         self.sync()
