@@ -1,6 +1,7 @@
 pub mod ast;
 mod constant_fold;
 mod eliminate_duplicate_functions;
+mod free_vars;
 mod from_py;
 mod inline_calls;
 mod inline_const;

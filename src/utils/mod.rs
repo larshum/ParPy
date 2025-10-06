@@ -1,6 +1,7 @@
 pub mod ast;
 pub mod constant_fold;
 pub mod debug;
+pub mod free_vars;
 pub mod err;
 pub mod info;
 pub mod name;
