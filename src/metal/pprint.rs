@@ -37,7 +37,7 @@ impl PrettyPrint for Type {
                     (env, format!("{mem} {ty}*"))
                 }
             },
-            Type::Buffer => (env, "MTL::Buffer*".to_string()),
+            Type::Buffer => (env, "metal_buffer*".to_string()),
             Type::Function => (env, "MTL::Function*".to_string()),
             Type::Library => (env, "MTL::Library*".to_string()),
             Type::Uint3 => (env, "uint3".to_string()),
@@ -160,7 +160,7 @@ impl PrettyPrint for Expr {
                 let (env, ty) = ty.pprint(env);
                 let (env, target) = target.pprint(env);
                 let (env, idx) = idx.pprint(env);
-                (env, format!("(({ty}*){target}->contents())[{idx}]"))
+                (env, format!("(({ty}*){target}->buf->contents())[{idx}]"))
             },
             Expr::Call {id, args, ..} => {
                 let (env, id) = id.pprint(env);

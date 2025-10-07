@@ -374,6 +374,8 @@ class MetalBuffer(Buffer):
         self.__array_interface__ = _to_array_interface(ptr, self.shape, self.dtype)
 
     def _get_ptr(self):
+        lib = self.buf._get_runtime_lib()
+        lib.parpy_buffer_set_offset(self.buf.buf, self.buf_offset * self.dtype.size())
         return self.buf.buf
 
     def _copy_to_numpy(self):
