@@ -337,7 +337,7 @@ class CudaBuffer(Buffer):
 
     def _get_ptr(self):
         ptr, _, _, = _check_array_interface(self.__cuda_array_interface__)
-        return ptr
+        return ptr + self.buf_offset * self.dtype.size()
 
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t, allow_cuda=True)

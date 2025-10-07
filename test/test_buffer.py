@@ -237,7 +237,5 @@ def test_buffer_call_with_indexed_argument(backend):
         b = parpy.buffer.from_array(a, backend)
         elemwise_add_one(b[1], opts=par_opts(backend, {'N': parpy.threads(32)}))
         a[1,:] += 1.0
-        print(a)
-        print(b.numpy())
         assert np.allclose(a, b.numpy(), atol=1e-5)
     run_if_backend_is_enabled(backend, helper)
