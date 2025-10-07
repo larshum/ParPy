@@ -22,7 +22,7 @@ pub enum Type {
     Function {result: Box<Type>, args: Vec<Type>},
 
     // Metal-specific types
-    MTLBuffer,
+    MTLBufferPtr,
     MTLFunction,
     MTLLibrary,
     Uint3,

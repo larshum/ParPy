@@ -39,12 +39,16 @@ fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv,
         },
         Type::Pointer {ty, mem} => {
             let (env, mem) = mem.pprint(env);
-            let decl = if mem.is_empty() {
-                format!("(*{decl})")
-            } else {
-                format!("{mem} (*{decl})")
+            let decl = match ty.as_ref() {
+                Type::Function {..} => format!("(*{decl})"),
+                _ => format!("*{decl}")
             };
-            pprint_type(decl, ty, env)
+            let (env, s) = pprint_type(decl, ty, env);
+            if mem.is_empty() {
+                (env, s)
+            } else {
+                (env, format!("{mem} {s}"))
+            }
         },
         Type::Function {result, args} => {
             let (env, args) = args.iter()
@@ -56,7 +60,7 @@ fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv,
             let args = args.into_iter().join(", ");
             pprint_type(format!("{decl}({args})"), result, env)
         },
-        Type::MTLBuffer => join_space("metal_buffer".to_string(), decl, env),
+        Type::MTLBufferPtr => join_space("metal_buffer*".to_string(), decl, env),
         Type::MTLFunction => join_space("MTL::Function".to_string(), decl, env),
         Type::MTLLibrary => join_space("MTL::Library".to_string(), decl, env),
         Type::Uint3 => join_space("uint3".to_string(), decl, env),
@@ -396,15 +400,15 @@ impl PrettyPrint for Top {
                 (env, format!("#define {id}({0}) {ext_id}({0})", param_ids))
             },
             Top::VarDef {ty, id, init} => {
-                let (env, ty) = ty.pprint(env);
                 let (env, id) = id.pprint(env);
+                let (env, s) = pprint_type(id, ty, env);
                 let (env, init) = if let Some(e) = init {
                     let (env, e) = e.pprint(env);
                     (env, format!(" = {e}"))
                 } else {
                     (env, "".to_string())
                 };
-                (env, format!("{ty} {id}{init};"))
+                (env, format!("{s}{init};"))
             },
             Top::FunDef {attrs, is_kernel, ret_ty, id, params, body} => {
                 let (env, attrs) = pprint_iter(attrs.iter(), env, "\n");
@@ -627,8 +631,8 @@ mod test {
 
     #[test]
     fn print_buffer_param() {
-        let p = Param {id: id("x"), ty: Type::MTLBuffer, attr: Some(ParamAttribute::Buffer {idx: 0})};
-        assert_eq!(p.pprint_default(), "metal_buffer x [[buffer(0)]]");
+        let p = Param {id: id("x"), ty: Type::MTLBufferPtr, attr: Some(ParamAttribute::Buffer {idx: 0})};
+        assert_eq!(p.pprint_default(), "metal_buffer* x [[buffer(0)]]");
     }
 
     #[test]

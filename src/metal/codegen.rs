@@ -54,21 +54,25 @@ fn from_gpu_ir_type(env: &CodegenEnv, ty: gpu_ast::Type, i: &Info) -> CompileRes
             }
         },
         gpu_ast::Type::Pointer {ty, mem} => {
-            let ty = match from_gpu_ir_type(env, *ty, i) {
+            match from_gpu_ir_type(env, *ty, i) {
                 Ok(Type::Pointer {..}) => {
                     parpy_type_error!(i, "Found nested pointer in generated code, \
                                             which is not supported in Metal.")
                 },
-                Ok(ty) => Ok(Box::new(ty)),
+                Ok(ty @ Type::Function {..}) => {
+                    Ok(Type::Pointer {ty: Box::new(ty), mem: MemSpace::Host})
+                },
+                Ok(ty) => {
+                    let mem = from_gpu_ir_mem(mem);
+                    // The only pointers used in host code (outside the device) are pointers to Metal
+                    // buffers containing GPU data.
+                    if env.on_device {
+                        Ok(Type::Pointer {ty: Box::new(ty), mem})
+                    } else {
+                        Ok(Type::MTLBufferPtr)
+                    }
+                },
                 Err(e) => Err(e)
-            }?;
-            let mem = from_gpu_ir_mem(mem);
-            // The only pointers used in host code (outside the device) are pointers to Metal
-            // buffers containing GPU data.
-            if env.on_device {
-                Ok(Type::Pointer {ty, mem})
-            } else {
-                Ok(Type::MTLBuffer)
             }
         },
         gpu_ast::Type::Struct {id} => {
@@ -445,12 +449,16 @@ fn add_grid_index_arguments_to_kernels(mut tops: TopsAcc) -> TopsAcc {
 
 fn add_top_kernel_def(mut acc: Vec<Top>, t: &Top, lib_id: &Name) -> Vec<Top> {
     if let Top::FunDef {is_kernel: true, id, ..} = t {
+        let ty = Type::Pointer {
+            ty: Box::new(Type::MTLFunction),
+            mem: MemSpace::Host
+        };
         let get_fun_expr = Expr::GetFun {
-            lib: lib_id.clone(), fun_id: id.clone(), ty: Type::MTLFunction,
+            lib: lib_id.clone(), fun_id: id.clone(), ty: ty.clone(),
             i: Info::default()
         };
         acc.push(Top::VarDef {
-            ty: Type::MTLFunction, id: id.clone(), init: Some(get_fun_expr)
+            ty, id: id.clone(), init: Some(get_fun_expr)
         });
     }
     acc
@@ -461,9 +469,13 @@ fn add_top_kernel_defs(acc: Vec<Top>, tops: &Vec<Top>, lib_id: &Name) -> Vec<Top
 }
 
 fn generate_kernel_library_top(lib_id: Name, tops: Vec<Top>) -> Top {
+    let ty = Type::Pointer {
+        ty: Box::new(Type::MTLLibrary),
+        mem: MemSpace::Host
+    };
     Top::VarDef {
-        ty: Type::MTLLibrary, id: lib_id,
-        init: Some(Expr::LoadLibrary {tops, ty: Type::MTLLibrary, i: Info::default()})
+        ty: ty.clone(), id: lib_id,
+        init: Some(Expr::LoadLibrary {tops, ty, i: Info::default()})
     }
 }
 
@@ -531,7 +543,7 @@ mod test {
     fn from_1d_pointer_host() {
         let ty = gpu::pointer(gpu::scalar(ElemSize::F32), gpu_ast::MemSpace::Device);
         let env = mk_host_env();
-        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::MTLBuffer);
+        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::MTLBufferPtr);
     }
 
     #[test]
@@ -558,7 +570,7 @@ mod test {
         );
         let env = mk_host_env();
         let expected = Expr::HostArrayAccess {
-            target: Box::new(var("x", Type::MTLBuffer)),
+            target: Box::new(var("x", Type::MTLBufferPtr)),
             idx: Box::new(int(0, ElemSize::I32)),
             ty: scalar(ElemSize::F32),
             i: i()
@@ -615,7 +627,7 @@ mod test {
         let ty = gpu::pointer(gpu::scalar(ElemSize::I32), gpu_ast::MemSpace::Device);
         let p = gpu_ast::Param {id: id("x"), ty, i: i()};
         let expected = Param {
-            id: id("x"), ty: Type::MTLBuffer,
+            id: id("x"), ty: Type::MTLBufferPtr,
             attr: Some(ParamAttribute::Buffer {idx: 1})
         };
         assert_eq!(from_gpu_ir_param(&env, p, Some(1)), Ok(expected));
