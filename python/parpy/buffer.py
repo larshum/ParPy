@@ -109,7 +109,7 @@ def zeros(shape, dtype, backend):
     elif backend == CompileBackend.Metal:
         b = empty(shape, dtype, backend)
         lib = _compile_runtime_lib(backend)
-        _check_errors(lib, lib.parpy_memset(b.buf, b.size(), 0))
+        _check_errors(lib, lib.parpy_memset(b.buf.buf, b.size(), 0))
         return b
     else:
         raise ValueError(f"Cannot construct buffer of type {type(b)}")
@@ -223,7 +223,7 @@ class MetalBaseBuffer(BaseBuffer):
         except:
             raise ValueError(f"Cannot convert argument {t} to a Metal buffer")
         data_ptr, shape, dtype = _extract_array_interface(t)
-        lib = self._get_runtime_lib()
+        lib = _compile_runtime_lib(CompileBackend.Metal)
         nbytes = _size(shape, dtype)
         buf = _check_not_nullptr(lib, lib.parpy_alloc_buffer(nbytes))
         _check_errors(lib, lib.parpy_memcpy(buf, data_ptr, nbytes, 1))
@@ -369,13 +369,22 @@ class CudaBuffer(Buffer):
 class MetalBuffer(Buffer):
     def __init__(self, buf, shape, dtype, buf_offset=0):
         super().__init__(buf, shape, dtype, buf_offset)
-        lib = self._get_runtime_lib()
-        ptr = lib.parpy_ptr_buffer(self.buf)
+        lib = self.buf._get_runtime_lib()
+        ptr = lib.parpy_ptr_buffer(self.buf.buf)
         self.__array_interface__ = _to_array_interface(ptr, self.shape, self.dtype)
 
     def _get_ptr(self):
-        lib = self._get_runtime_lib()
-        return lib.parpy_ptr_buffer(self.buf.buf)
+        return self.buf.buf
+
+    def _copy_to_numpy(self):
+        import numpy as np
+        nelems = self.buf.nbytes // self.dtype.size()
+        a = np.ndarray((nelems,), dtype=self.dtype.to_numpy())
+        ptr, _, _ = _check_array_interface(a.__array_interface__)
+        self.buf.sync()
+        lib = self.buf._get_runtime_lib()
+        _check_errors(lib, lib.parpy_memcpy(ptr, self.buf.buf, self.buf.nbytes, 2))
+        return a
 
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t)
@@ -387,17 +396,16 @@ class MetalBuffer(Buffer):
         return MetalBuffer(buf, shape, dtype)
 
     def numpy(self):
-        import numpy as np
-        return self._get_indexed(np.asarray(self))
+        return self._get_indexed(self._copy_to_numpy())
 
     def torch(self):
         import torch
-        return self._get_indexed(torch.as_tensor(self.numpy()))
+        return self._get_indexed(torch.as_tensor(self._copy_to_numpy()))
 
     def copy(self):
         b = empty(self.shape, self.dtype, CompileBackend.Metal)
-        self.sync()
-        lib = self._get_runtime_lib()
+        self.buf.sync()
+        lib = self.buf._get_runtime_lib()
         _check_errors(lib, lib.parpy_memcpy(b.buf.buf, self.buf.buf, self.size(), 3))
         return b
 
