@@ -1,4 +1,6 @@
+import numpy as np
 import parpy
+import torch
 
 from common import *
 
@@ -24,7 +26,6 @@ def test_buffer_empty_like(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_zeros(backend):
     def helper():
-        import numpy as np
         shape = (20, 10, 32)
         b = parpy.buffer.zeros(shape, parpy.types.F32, backend)
         n = b.numpy()
@@ -34,7 +35,6 @@ def test_buffer_zeros(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_zeros_like(backend):
     def helper():
-        import numpy as np
         shape = (20, 10, 32)
         b1 = parpy.buffer.empty(shape, parpy.types.F32, backend)
         b2 = parpy.buffer.zeros_like(b1)
@@ -46,17 +46,15 @@ def test_buffer_zeros_like(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_from_numpy_array(backend):
     def helper():
-        import numpy as np
         shape = (20, 10, 32)
         a = np.ndarray(shape, dtype=np.float32)
         b = parpy.buffer.from_array(a, backend)
         assert b.shape == shape
         assert b.dtype == parpy.buffer.DataType.from_elem_size(parpy.types.F32)
-        assert b.src is a
+        assert b.buf.src is a
     run_if_backend_is_enabled(backend, helper)
 
 def test_buffer_from_array_none_backend():
-    import numpy as np
     shape = (20, 10, 32)
     a = np.ndarray(shape, dtype=np.float32)
     b = parpy.buffer.from_array(a, None)
@@ -64,7 +62,6 @@ def test_buffer_from_array_none_backend():
     assert b.dtype == parpy.buffer.DataType.from_elem_size(parpy.types.F32)
 
 def test_buffer_from_array_invalid_backend():
-    import numpy as np
     a = np.ndarray((10,), dtype=np.float32)
     with pytest.raises(ValueError) as e_info:
         b = parpy.buffer.from_array(a, 5)
@@ -73,7 +70,6 @@ def test_buffer_from_array_invalid_backend():
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_singleton_to_float(backend):
     def helper():
-        import numpy as np
         a = np.array(2.5, dtype=np.float32)
         b = parpy.buffer.from_array(a, backend)
         assert float(b) == 2.5
@@ -82,7 +78,6 @@ def test_buffer_singleton_to_float(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_singleton_to_int(backend):
     def helper():
-        import numpy as np
         a = np.array(2, dtype=np.int32)
         b = parpy.buffer.from_array(a, backend)
         assert int(b) == 2
@@ -91,7 +86,6 @@ def test_buffer_singleton_to_int(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_singleton_to_bool(backend):
     def helper():
-        import torch
         a = torch.tensor(True, dtype=torch.bool)
         b = parpy.buffer.from_array(a, backend)
         assert bool(b)
@@ -110,7 +104,6 @@ def test_buffer_size(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_to_numpy(backend):
     def helper():
-        import numpy as np
         shape = (20, 10, 32)
         dtype = parpy.types.I16
         b = parpy.buffer.zeros(shape, dtype, backend)
@@ -123,7 +116,6 @@ def test_buffer_to_numpy(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_to_torch(backend):
     def helper():
-        import torch
         shape = (20, 10, 32)
         dtype = parpy.types.I16
         b = parpy.buffer.zeros(shape, dtype, backend)
@@ -135,20 +127,6 @@ def test_buffer_to_torch(backend):
             assert a.device == torch.device('cuda', 0)
         else:
             assert a.device == torch.device('cpu')
-    run_if_backend_is_enabled(backend, helper)
-
-@pytest.mark.parametrize('backend', compiler_backends)
-def test_buffer_reshape_refcount(backend):
-    def helper():
-        shape = (20, 10, 32)
-        b1 = parpy.buffer.zeros(shape, parpy.types.F32, backend)
-        assert b1.refcount[0] == 1
-        b2 = b1.reshape(200, 32)
-        assert b1.shape == shape
-        assert b2.shape == (200, 32)
-        assert b1.refcount[0] == 2 and b2.refcount[0] == 2
-        del b2
-        assert b1.refcount[0] == 1
     run_if_backend_is_enabled(backend, helper)
 
 @pytest.mark.parametrize('backend', compiler_backends)
@@ -186,10 +164,78 @@ def test_buffer_convert_int_to_float_type(backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_back_to_back_conversion(backend):
     def helper():
-        import numpy as np
         shape = (20, 10, 32)
         a = np.random.randn(*shape)
         b = parpy.buffer.from_array(a, backend)
         c = b.numpy()
         assert np.allclose(a, c)
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_indexing(backend):
+    def helper():
+        shape = (20,)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        assert b[12] == a[12]
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_indexing_elem(backend):
+    def helper():
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        print(b[12,9,14])
+        print(a[12,9,14])
+        assert b[12, 9, 14] == a[12, 9, 14]
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_partial_indexing(backend):
+    def helper():
+        import numpy as np
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        assert np.allclose(b[12].numpy(), a[12])
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_partial_indexing_torch(backend):
+    def helper():
+        import torch
+        shape = (20, 10, 32)
+        a = torch.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        if backend == parpy.CompileBackend.Cuda:
+            assert torch.allclose(b[12].torch(), a[12].cuda())
+        else:
+            assert torch.allclose(b[12].torch(), a[12])
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_indexing_out_of_bounds(backend):
+    def helper():
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        with pytest.raises(IndexError):
+            b[21]
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_call_with_indexed_argument(backend):
+    def helper():
+        N = parpy.types.symbol()
+        @parpy.jit
+        def elemwise_add_one(x: parpy.types.buffer(parpy.types.F32, [N])):
+            for i in range(N):
+                x[i] += 1.0
+        shape = (2, 32)
+        a = np.random.randn(*shape).astype(np.float32)
+        b = parpy.buffer.from_array(a, backend)
+        elemwise_add_one(b[1], opts=par_opts(backend, {'N': parpy.threads(32)}))
+        a[1,:] += 1.0
+        assert np.allclose(a, b.numpy(), atol=1e-5)
     run_if_backend_is_enabled(backend, helper)

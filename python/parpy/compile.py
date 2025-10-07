@@ -163,7 +163,7 @@ def get_wrapper(name, key, opts):
     def value_or_ptr(arg):
         if isinstance(arg, Buffer):
             if len(arg.shape) == 0:
-                return arg.numpy()
+                return arg.numpy().item()
             else:
                 return arg._get_ptr()
         else:

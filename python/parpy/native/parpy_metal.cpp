@@ -27,21 +27,28 @@ extern "C" int32_t parpy_sync() {
   return 0;
 }
 
-extern "C" MTL::Buffer *parpy_alloc_buffer(int64_t nbytes) {
+extern "C" metal_buffer *parpy_alloc_buffer(int64_t nbytes) {
   MTL::Buffer *buf = device->newBuffer(nbytes, MTL::ResourceStorageModeShared);
   if (buf == nullptr) {
     parpy_metal::error_message = "Failed to allocate buffer";
     return nullptr;
   }
-  return buf;
+  metal_buffer *b = (metal_buffer*)malloc(sizeof(metal_buffer));
+  b->buf = buf;
+  b->offset = 0;
+  return b;
 }
 
-extern "C" void *parpy_ptr_buffer(MTL::Buffer *buf) {
-  return buf->contents();
+extern "C" void *parpy_ptr_buffer(metal_buffer *b) {
+  return b->buf->contents();
+}
+
+extern "C" void parpy_buffer_set_offset(metal_buffer *b, int64_t offset) {
+  b->offset = offset;
 }
 
 extern "C" int32_t parpy_memcpy(void *dst, void *src, int64_t nbytes, int64_t k) {
-  // If an argument represents device memory, it is an MTL::Buffer pointer
+  // If an argument represents device memory, it is a Metal buffer pointer
   // from which we need to extract the actual data pointer. Otherwise, we use
   // the provided pointer immediately. We use 'k' to encode the memory types
   // of the arguments:
@@ -49,8 +56,8 @@ extern "C" int32_t parpy_memcpy(void *dst, void *src, int64_t nbytes, int64_t k)
   //  1: source is in host memory, destination on device
   //  2: source is in device memory, destination on host
   //  3: both device
-  dst = k & 1 ? ((MTL::Buffer*)dst)->contents() : dst;
-  src = k & 2 ? ((MTL::Buffer*)src)->contents() : src;
+  dst = k & 1 ? ((metal_buffer*)dst)->buf->contents() : dst;
+  src = k & 2 ? ((metal_buffer*)src)->buf->contents() : src;
   memcpy(dst, src, nbytes);
   return 0;
 }
@@ -60,8 +67,9 @@ extern "C" int32_t parpy_memset(void *ptr, int64_t nbytes, int8_t value) {
   return 0;
 }
 
-extern "C" int32_t parpy_free_buffer(MTL::Buffer *buf) {
-  buf->release();
+extern "C" int32_t parpy_free_buffer(metal_buffer *b) {
+  b->buf->release();
+  free(b);
   return 0;
 }
 
@@ -91,7 +99,7 @@ namespace parpy_metal {
     return f;
   }
 
-  int32_t alloc(MTL::Buffer **buf, int64_t nbytes) {
+  int32_t alloc(metal_buffer **buf, int64_t nbytes) {
     *buf = parpy_alloc_buffer(nbytes);
     if (*buf == nullptr) {
       parpy_metal::error_message = "Buffer allocation failed";
@@ -100,7 +108,7 @@ namespace parpy_metal {
     return 0;
   }
 
-  void free(MTL::Buffer *b) {
+  void free(metal_buffer *b) {
     parpy_free_buffer(b);
   }
 
@@ -110,7 +118,7 @@ namespace parpy_metal {
 
   int32_t launch_kernel(
       MTL::Function *kernel,
-      std::vector<MTL::Buffer*> args,
+      std::vector<metal_buffer*> args,
       int64_t block_x, int64_t block_y, int64_t block_z,
       int64_t thread_x, int64_t thread_y, int64_t thread_z) {
     if (cb == nullptr || cb->status() != MTL::CommandBufferStatusNotEnqueued) {
@@ -139,7 +147,7 @@ namespace parpy_metal {
 
     ce->setComputePipelineState(state);
     for (int i = 0; i < args.size(); i++) {
-      ce->setBuffer(args[i], 0, i);
+      ce->setBuffer(args[i]->buf, args[i]->offset, i);
     }
 
     int simd_width = state->threadExecutionWidth();
