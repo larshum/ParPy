@@ -102,7 +102,7 @@ impl ElemSize {
         }
     }
 
-    fn to_ctype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
+    pub fn to_ctype<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyAny>> {
         let ctypes = py.import("ctypes")?;
         match self {
             ElemSize::Bool => ctypes.getattr("c_bool"),

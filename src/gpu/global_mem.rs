@@ -91,8 +91,7 @@ fn find_thread_index_dependent_variables_top(
         Top::KernelFunDef {body, ..} => {
             body.sfold(acc, find_thread_index_dependent_variables_stmt)
         },
-        Top::ExtDecl {..} | Top::FunDef {..} | Top::CallbackDecl {..} |
-        Top::StructDef {..} => acc
+        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => acc
     }
 }
 
@@ -184,8 +183,7 @@ fn transform_thread_independent_memory_writes_top(
             let body = transform_thread_independent_memory_writes_stmts(body, vars);
             Top::KernelFunDef {attrs, id, params, body, i}
         },
-        Top::ExtDecl {..} | Top::FunDef {..} | Top::CallbackDecl {..} |
-        Top::StructDef {..} => top,
+        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => top,
     }
 }
 

@@ -2,6 +2,7 @@ use crate::utils::name::Name;
 
 use std::collections::BTreeMap;
 
+#[derive(Clone, Debug)]
 pub struct FVEnv<T> {
     pub bound: BTreeMap<Name, T>,
     pub free: BTreeMap<Name, T>,
@@ -18,6 +19,11 @@ impl<T> Default for FVEnv<T> {
 
 pub trait FreeVars<T: Clone> {
     fn fv(&self, env: FVEnv<T>) -> FVEnv<T> where Self: Sized;
+
+    fn free_vars(&self) -> BTreeMap<Name, T> where Self: Sized {
+        let env = self.fv(FVEnv::default());
+        env.free
+    }
 }
 
 pub fn bind_variable<T: Clone>(mut env: FVEnv<T>, id: &Name, ty: &T) -> FVEnv<T> {

@@ -1,3 +1,4 @@
+mod callbacks;
 mod cuda;
 mod ext;
 mod gpu;
@@ -86,8 +87,9 @@ fn compile_ir<'py>(
     cap: Bound<'py, PyCapsule>,
     args: Vec<Bound<'py, PyAny>>,
     opts: option::CompileOptions,
-    ir_asts: BTreeMap<String, Bound<'py, PyCapsule>>
-) -> PyResult<(String, String)> {
+    ir_asts: BTreeMap<String, Bound<'py, PyCapsule>>,
+    py: Python<'py>
+) -> PyResult<(Vec<Bound<'py, PyAny>>, Vec<String>, String, String)> {
     // Extract a reference to the untyped AST parsed earlier.
     let t: &py::ast::Top = unsafe { cap.reference() };
 
@@ -112,7 +114,18 @@ fn compile_ir<'py>(
     // it includes constructs exclusive to GPU programming, such as thread and block indexing and
     // statements representing the allocation of shared memory.
     let gpu_ast = gpu::from_general_ir(ir_ast, &opts, &debug_env)?;
-    debug_env.print("GPU AST", &gpu_ast);
+
+    // Extracts the callback functions used in the GPU AST and produces separate ASTs for these.
+    // The result consists of three parts:
+    // - A complete list of the argument types (as Ctypes types) of the entry point, including the
+    //   callback functions.
+    // - A list of Python ASTs (in the form of a function definition) representing a wrapper to
+    //   each callback function, which wraps pointer arguments as a ParPy buffer (keeping track of
+    //   its type and shape) and repeatedly calls the user-provided callback function, to minimize
+    //   the overhead of argument wrapping.
+    // - The updated GPU AST, with callback functions as arguments to the entry point function.
+    let (argtypes, callback_asts, gpu_ast) = callbacks::from_gpu_ast(&opts, gpu_ast, py)?;
+    debug_env.print("GPU AST after callback conversion", &gpu_ast);
 
     // Compile using the backend-specific approach to code generation. In the end, we pretty-print
     // the AST with and without symbols. The latter is used as a key to the cache - if only the
@@ -121,12 +134,22 @@ fn compile_ir<'py>(
         option::CompileBackend::Cuda => {
             let ast = cuda::codegen(gpu_ast, &opts)?;
             debug_env.print("CUDA AST", &ast);
-            Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
+            Ok((
+                argtypes,
+                callback_asts,
+                ast.pprint_default(),
+                ast.pprint_ignore_symbols()
+            ))
         },
         option::CompileBackend::Metal => {
             let ast = metal::codegen(gpu_ast)?;
             debug_env.print("Metal AST", &ast);
-            Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
+            Ok((
+                argtypes,
+                callback_asts,
+                ast.pprint_default(),
+                ast.pprint_ignore_symbols()
+            ))
         },
         option::CompileBackend::Auto => {
             Err(PyRuntimeError::new_err("Internal error: Auto backend should \

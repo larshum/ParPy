@@ -1,9 +1,8 @@
-mod add_callbacks;
 pub mod ast;
 mod codegen;
 mod constant_fold;
 pub mod flatten_structs;
-mod free_vars;
+pub mod free_vars;
 mod global_mem;
 mod inter_block;
 mod par;
@@ -47,14 +46,7 @@ pub fn from_general_ir(
     let ast = global_mem::eliminate_block_wide_memory_writes(ast)?;
     debug_env.print("GPU AST after eliminating block-wide memory writes", &ast);
 
-    let ast = add_callbacks::apply(ast)?;
-    debug_env.print("GPU AST after adding callback functions as parameters", &ast);
-
     let ast = constant_fold::fold(ast);
-
-    // Adds callback functions to the parameters of the main function.
-    let ast = add_callbacks::apply(ast)?;
-    debug_env.print("GPU AST after inserting callback parameters", &ast);
 
     // Eliminate redundant uses of synchronization. This includes repeated uses of synchronization
     // on the same scope and trailing synchronization at the end of a kernel.

@@ -628,7 +628,7 @@ mod test {
     #[test]
     fn print_buffer_param() {
         let p = Param {id: id("x"), ty: Type::MTLBuffer, attr: Some(ParamAttribute::Buffer {idx: 0})};
-        assert_eq!(p.pprint_default(), "MTL::Buffer x [[buffer(0)]]");
+        assert_eq!(p.pprint_default(), "metal_buffer x [[buffer(0)]]");
     }
 
     #[test]

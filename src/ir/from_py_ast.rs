@@ -269,6 +269,9 @@ fn to_ir_expr(
         py_ast::Expr::Tuple {i, ..} => {
             parpy_compile_error!(i, "Tuples are not allowed outside of indexing")
         },
+        py_ast::Expr::List {i, ..} => {
+            parpy_internal_error!(i, "Found list expression in IR conversion")
+        },
         py_ast::Expr::Call {id, args, ty, i} => {
             let args = args.into_iter()
                 .map(|e| to_ir_expr(env, e))
@@ -277,6 +280,10 @@ fn to_ir_expr(
             let par = lookup_external_parallelism(env, &id)
                 .unwrap_or(LoopPar::default());
             Ok(Expr::Call {id, args, par, ty, i})
+        },
+        py_ast::Expr::Callback {id, args, ty, i} => {
+            let ty = to_ir_type(env, &i, ty)?;
+            Ok(Expr::PyCallback {id, args, ty, i})
         },
         py_ast::Expr::Convert {e, ty, i} => {
             let e = Box::new(to_ir_expr(env, *e)?);
@@ -375,7 +382,9 @@ fn to_ir_stmt(
             let par = LoopPar::default().threads(1).unwrap();
             Ok(Stmt::For {var, lo, hi, step: 1, body, par, i})
         },
-        py_ast::Stmt::Expr {e: e @ py_ast::Expr::Call {..}, i} => {
+        py_ast::Stmt::Expr {
+            e: e @ (py_ast::Expr::Call {..} | py_ast::Expr::Callback {..}), i
+        } => {
             let e = to_ir_expr(env, e)?;
             Ok(Stmt::Expr {e, i})
         },
@@ -429,9 +438,8 @@ fn to_ir_top(
     t: py_ast::Top
 ) -> CompileResult<Top> {
     match t {
-        py_ast::Top::CallbackDecl {id, params, i} => {
-            let params = to_ir_params(env, params)?;
-            Ok(Top::CallbackDecl {id, params, i})
+        py_ast::Top::CallbackDecl {i, ..} => {
+            parpy_internal_error!(i, "Found callback declaration in IR translation")
         },
         py_ast::Top::ExtDecl {id, ext_id, params, res_ty, header, target, par: _, i} => {
             let params = to_ir_params(env, params)?;

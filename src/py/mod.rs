@@ -8,6 +8,7 @@ mod inline_const;
 mod labels;
 mod par;
 mod pprint;
+mod replace_callbacks;
 mod shape_symbol_labels;
 mod slice_transformation;
 mod specialize;
@@ -95,6 +96,13 @@ pub fn specialize_ast_on_arguments<'py>(
     // Transform slice statements into for-loops.
     let ast = slice_transformation::apply(ast, &scalar_sizes)?;
     debug_env.print("Python-like AST after slice transformation", &ast);
+
+    // Replace call expressions targeting callback functions with explicit callback nodes. For
+    // these nodes, we keep the Python AST details including the shapes of all subexpressions. When
+    // constructing the callback functions, we need the shapes to be able to re-construct the
+    // buffers in the wrapper.
+    let ast = replace_callbacks::apply(ast);
+    debug_env.print("Python-like AST after specializing callback calls", &ast);
 
     Ok(ast)
 }

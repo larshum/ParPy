@@ -865,10 +865,16 @@ impl TypeCheck for Expr {
                 let ty = Type::Tuple {elems: elem_types};
                 Ok((env, Expr::Tuple {elems, ty, i}))
             },
+            Expr::List {i, ..} => {
+                py_internal_error!(i, "Found list node in the type-checker")
+            },
             Expr::Call {id, args, ty: _, i} => {
                 let (env, args) = args.type_check(env)?;
                 let (env, new_id, ty, args) = type_check_call(env, &id, args, &i)?;
                 Ok((env, Expr::Call {id: new_id, args, ty, i}))
+            },
+            Expr::Callback {i, ..} => {
+                py_internal_error!(i, "Found callback node in the type-checker")
             },
             Expr::Convert {e, ty, i} => {
                 let (env, e) = e.type_check(env)?;

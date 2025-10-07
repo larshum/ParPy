@@ -120,12 +120,11 @@ impl Symbolize for Expr {
                 let (env, ty) = ty.symbolize(env)?;
                 Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
-            Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
-            Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-            Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
-            Expr::Slice {..} | Expr::Tuple {..} | Expr::GpuContext {..} |
-            Expr::Inline {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
-            Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
+            Expr::String {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} | Expr::IfExpr {..} |
+            Expr::Subscript {..} | Expr::Slice {..} | Expr::Tuple {..} | Expr::List {..} |
+            Expr::Callback {..} | Expr::GpuContext {..} | Expr::Inline {..} | Expr::Label {..} |
+            Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }

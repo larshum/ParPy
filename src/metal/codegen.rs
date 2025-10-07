@@ -108,7 +108,7 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
         },
         gpu_ast::Expr::StructFieldAccess {i, ..} => {
             parpy_internal_error!(i, "Found struct field access in the Metal backend,\
-                                        where structs are not supported.")
+                                      where structs are not supported.")
         },
         gpu_ast::Expr::ArrayAccess {target, idx, i, ..} => {
             let target = Box::new(from_gpu_ir_expr(env, *target)?);
@@ -125,13 +125,16 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
                 .collect::<CompileResult<Vec<Expr>>>()?;
             Ok(Expr::Call {id, args, ty, i})
         },
+        gpu_ast::Expr::PyCallback {i, ..} => {
+            parpy_internal_error!(i, "Found Python callback node in Metal codegen.")
+        },
         gpu_ast::Expr::Convert {e, ..} => {
             let e = Box::new(from_gpu_ir_expr(env, *e)?);
             Ok(Expr::Convert {e, ty})
         },
         gpu_ast::Expr::Struct {id, i, ..} => {
             parpy_internal_error!(i, "Found struct {id} in the Metal backend,\
-                                        where structs are not supported.")
+                                      where structs are not supported.")
         },
         gpu_ast::Expr::ThreadIdx {dim, i, ..} => Ok(Expr::ThreadIdx {dim, ty, i}),
         gpu_ast::Expr::BlockIdx {dim, i, ..} => Ok(Expr::BlockIdx {dim, ty, i}),
@@ -359,11 +362,6 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
                                       Metal codegen, which does not support \
                                       struct types.")
         }
-        gpu_ast::Top::CallbackDecl {id, i, ..} => {
-            parpy_internal_error!(i, "Found callback declaration {id} in the \
-                                      Metal codegen, where it should have \
-                                      already been eliminated.")
-        },
     }
 }
 

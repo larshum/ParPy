@@ -69,6 +69,9 @@ fn from_ir_expr(e: ir_ast::Expr) -> CompileResult<Expr> {
                 .collect::<CompileResult<Vec<Expr>>>()?;
             Ok(Expr::Call {id, args, ty, i})
         },
+        ir_ast::Expr::PyCallback {id, args, i, ..} => {
+            Ok(Expr::PyCallback {id, args, ty, i})
+        },
         ir_ast::Expr::Convert {e, ..} => {
             let e = Box::new(from_ir_expr(*e)?);
             Ok(Expr::Convert {e, ty})
@@ -590,10 +593,6 @@ fn from_ir_top(
                 .collect::<Vec<Field>>();
             env.struct_fields.insert(id.clone(), fields.clone());
             Ok((env, Top::StructDef {id, fields, i}))
-        },
-        ir_ast::Top::CallbackDecl {id, params, i} => {
-            let params = from_ir_params(params);
-            Ok((env, Top::CallbackDecl {id, params, i}))
         },
         ir_ast::Top::ExtDecl {id, ext_id, params, res_ty, target, header, i} => {
             let params = from_ir_params(params);

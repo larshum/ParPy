@@ -189,7 +189,7 @@ fn flatten_structs_top(
             env.insert(id, renamed_fields);
             Ok((env, None))
         },
-        Top::ExtDecl {..} | Top::CallbackDecl {..} => Ok((env, Some(t))),
+        Top::ExtDecl {..} => Ok((env, Some(t))),
     }
 }
 

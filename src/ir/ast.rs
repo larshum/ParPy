@@ -1,3 +1,4 @@
+use crate::py::ast as py_ast;
 use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::smap::*;
@@ -8,6 +9,8 @@ pub use crate::utils::ast::ElemSize;
 pub use crate::utils::ast::UnOp;
 pub use crate::utils::ast::BinOp;
 pub use crate::utils::ast::Target;
+
+use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
@@ -29,6 +32,7 @@ pub enum Expr {
     StructFieldAccess {target: Box<Expr>, label: String, ty: Type, i: Info},
     TensorAccess {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, par: LoopPar, ty: Type, i: Info},
+    PyCallback {id: Name, args: Vec<py_ast::Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type, i: Info},
 }
 
@@ -45,6 +49,7 @@ impl Expr {
             Expr::StructFieldAccess {ty, ..} => ty,
             Expr::TensorAccess {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
+            Expr::PyCallback {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
         }
     }
@@ -63,6 +68,7 @@ impl InfoNode for Expr {
             Expr::StructFieldAccess {i, ..} => i.clone(),
             Expr::TensorAccess {i, ..} => i.clone(),
             Expr::Call {i, ..} => i.clone(),
+            Expr::PyCallback {i, ..} => i.clone(),
             Expr::Convert {e, ..} => e.get_info(),
         }
     }
@@ -92,6 +98,9 @@ impl PartialEq for Expr {
                 ltarget.eq(rtarget) && lidx.eq(ridx),
             ( Expr::Call {id: lid, args: largs, ..}
             , Expr::Call {id: rid, args: rargs, ..} ) =>
+                lid.eq(rid) && largs.eq(rargs),
+            ( Expr::PyCallback {id: lid, args: largs, ..}
+            , Expr::PyCallback {id: rid, args: rargs, ..} ) =>
                 lid.eq(rid) && largs.eq(rargs),
             (Expr::Convert {e: le, ..}, Expr::Convert {e: re, ..}) => le.eq(re),
             (_, _) => false
@@ -139,6 +148,7 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, par, ty, i}))
             },
+            Expr::PyCallback {..} => Ok((acc?, self)),
             Expr::Convert {e, ty, i} => {
                 let (acc, e) = f(acc?, *e)?;
                 Ok((acc, Expr::Convert {e: Box::new(e), ty, i}))
@@ -161,6 +171,7 @@ impl SFold<Expr> for Expr {
             Expr::StructFieldAccess {target, ..} => f(acc?, target),
             Expr::TensorAccess {target, idx, ..} => f(f(acc?, target)?, idx),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
+            Expr::PyCallback {..} => acc,
             Expr::Convert {e, ..} => f(acc?, e),
         }
     }
@@ -371,7 +382,6 @@ pub struct FunDef {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Top {
-    CallbackDecl {id: Name, params: Vec<Param>, i: Info},
     StructDef {id: Name, fields: Vec<Field>, i: Info},
     ExtDecl {
         id: Name, ext_id: String, params: Vec<Param>, res_ty: Type,

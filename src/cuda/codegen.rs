@@ -108,6 +108,9 @@ fn from_gpu_ir_expr(e: gpu_ast::Expr) -> CompileResult<Expr> {
                 Ok(Expr::Call {id, args, ty, i})
             }
         },
+        gpu_ast::Expr::PyCallback {i, ..} => {
+            parpy_internal_error!(i, "Found Python callback node in CUDA codegen.")
+        },
         gpu_ast::Expr::Convert {e, ..} => {
             let e = from_gpu_ir_expr(*e)?;
             Ok(Expr::Convert {e: Box::new(e), ty})
@@ -294,11 +297,6 @@ fn from_gpu_ir_top(
                 .map(from_gpu_ir_field)
                 .collect::<Vec<Field>>();
             tops.push(Top::StructDef {id, fields});
-        },
-        gpu_ast::Top::CallbackDecl {id, i, ..} => {
-            parpy_internal_error!(i, "Found callback declaration {id} in the \
-                                      CUDA codegen, where it should have \
-                                      already been eliminated.")?
         },
     };
     Ok((includes, tops))

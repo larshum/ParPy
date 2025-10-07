@@ -69,16 +69,6 @@ def _alloc_data(shape, dtype, lib):
     nbytes = _size(shape, dtype)
     return _check_not_nullptr(lib, lib.parpy_alloc_buffer(nbytes))
 
-def _from_raw(ptr, shape, dtype, backend):
-    if backend is None:
-        return DummyBuffer(ptr, shape, dtype)
-    elif backend == CompileBackend.Cuda:
-        return CudaBuffer(ptr, shape, dtype, raw=True)
-    elif backend == CompileBackend.Metal:
-        raise ValueError(f"Cannot construct Metal buffer from raw data")
-    else:
-        raise ValueError(f"Cannot convert raw data to buffer of unknown backend {backend}")
-
 def sync(backend):
     """
     Synchronizes the CPU and the target device by waiting until all running
@@ -141,6 +131,16 @@ def from_array(t, backend):
         return MetalBuffer.from_array(t)
     else:
         raise ValueError(f"Cannot convert to buffer of unknown backend {backend}")
+
+def from_raw(ptr, shape, dtype, backend):
+    if backend is None:
+        return Buffer.from_raw(ptr, shape, dtype)
+    elif backend == CompileBackend.Cuda:
+        return CudaBuffer.from_raw(ptr, shape, dtype)
+    elif backend == CompileBackend.Metal:
+        return MetalBuffer.from_raw(ptr, shape, dtype)
+    else:
+        raise ValueError(f"Cannot convert raw data to buffer of unknown backend {backend}")
 
 class BaseBuffer:
     def __init__(self, buf, nbytes, src):
@@ -349,6 +349,9 @@ class CudaBuffer(Buffer):
         ptr, _, _, = _check_array_interface(self.__cuda_array_interface__)
         return ptr + self.buf_offset * self.dtype.size()
 
+    def backend(self):
+        return CompileBackend.Cuda
+
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t, allow_cuda=True)
         buf = CudaBaseBuffer.from_array(t)
@@ -414,6 +417,9 @@ class MetalBuffer(Buffer):
         lib = self.buf._get_runtime_lib()
         _check_errors(lib, lib.parpy_memcpy(ptr, self.buf.buf, self.buf.nbytes, 2))
         return a
+
+    def backend(self):
+        return CompileBackend.Metal
 
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t)

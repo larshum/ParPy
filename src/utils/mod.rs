@@ -8,3 +8,4 @@ pub mod name;
 pub mod pprint;
 pub mod reduce;
 pub mod smap;
+pub mod substitute;

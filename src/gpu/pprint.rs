@@ -210,6 +210,11 @@ impl PrettyPrint for Expr {
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
             },
+            Expr::PyCallback {id, args, ..} => {
+                let (env, id) = id.pprint(env);
+                let (env, args) = pprint_iter(args.iter(), env, ", ");
+                (env, format!("{id}({args})"))
+            },
             Expr::Convert {e, ty} => {
                 let (env, e_str) = e.pprint(env);
                 let (env, ty) = ty.pprint(env);
@@ -483,11 +488,6 @@ impl PrettyPrint for Top {
                 let (env, fields) = pprint_iter(fields.iter(), env, "\n");
                 let env = env.decr_indent();
                 (env, format!("struct {id} {{\n{fields}\n}};"))
-            },
-            Top::CallbackDecl {id, params, i: _} => {
-                let (env, id) = id.pprint(env);
-                let (env, params) = pprint_iter(params.iter(), env, ", ");
-                (env, format!("void {id}({params}) = <callback>;"))
             },
         }
     }

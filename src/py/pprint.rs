@@ -201,7 +201,12 @@ impl PrettyPrint for Expr {
                 let (env, elems) = pprint_iter(elems.iter(), env, ", ");
                 (env, format!("({elems})"))
             },
-            Expr::Call {id, args, ..} => {
+            Expr::List {elems, ..} => {
+                let (env, elems) = pprint_iter(elems.iter(), env, ", ");
+                (env, format!("[{elems}]"))
+            },
+            Expr::Call {id, args, ..} |
+            Expr::Callback {id, args, ..} => {
                 let (env, id) = id.pprint(env);
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
@@ -349,7 +354,7 @@ impl PrettyPrint for Ast {
         let Ast {tops, main} = self;
         let (env, tops) = pprint_iter(tops.iter(), env, "\n");
         let (env, main) = main.pprint(env);
-        (env, format!("import parpy.types\n{tops}\n{main}"))
+        (env, format!("import parpy\n{tops}\n{main}"))
     }
 }
 

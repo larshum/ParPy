@@ -10,13 +10,13 @@ use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::pprint::*;
 use crate::utils::reduce;
-use crate::utils::smap::*;
+use crate::utils::smap::{SFlatten, SFold, SMapAccum};
+use crate::utils::substitute::SubVars;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 fn collect_host_functions(mut acc: BTreeSet<Name>, t: &Top) -> BTreeSet<Name> {
     match t {
-        Top::CallbackDecl {id, ..} |
         Top::ExtDecl {id, target: Target::Host, ..} => {
             acc.insert(id.clone());
             acc
@@ -45,6 +45,12 @@ fn insert_synchronization_points_stmt(
         } if host_functions.contains(&id) => {
             acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i: i.clone()});
             acc.push(Stmt::Expr {e: Expr::Call {id, args, par, ty, i: ei}, i: i.clone()});
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
+            acc
+        },
+        Stmt::Expr {e: Expr::PyCallback {id, args, ty, i: ei}, i} => {
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i: i.clone()});
+            acc.push(Stmt::Expr {e: Expr::PyCallback {id, args, ty, i: ei}, i: i.clone()});
             acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
             acc
         },
@@ -784,20 +790,6 @@ fn eliminate_unnecessary_synchronization_points(body: Vec<Stmt>) -> Vec<Stmt> {
     eliminate_unnecessary_synchronization_points_stmts(env, body)
 }
 
-fn sub_var_expr(from_id: &Name, to_id: &Name, e: Expr) -> Expr {
-    match e {
-        Expr::Var {id, ty, i} if id == *from_id => {
-            Expr::Var {id: to_id.clone(), ty, i}
-        },
-        _ => e.smap(|e| sub_var_expr(from_id, to_id, e))
-    }
-}
-
-fn sub_var_stmt(from_id: &Name, to_id: &Name, s: Stmt) -> Stmt {
-    s.smap(|s| sub_var_stmt(from_id, to_id, s))
-        .smap(|e| sub_var_expr(from_id, to_id, e))
-}
-
 fn resymbolize_duplicated_loops_stmt(
     mut vars: BTreeSet<Name>,
     s: Stmt
@@ -806,7 +798,10 @@ fn resymbolize_duplicated_loops_stmt(
         Stmt::For {var, lo, hi, step, body, par, i} => {
             let (var, body) = if vars.contains(&var) {
                 let new_id = var.clone().with_new_sym();
-                let body = body.smap(|s| sub_var_stmt(&var, &new_id, s));
+                let sub_env = vec![(var.clone(), new_id.clone())]
+                    .into_iter()
+                    .collect::<BTreeMap<Name, Name>>();
+                let body = body.smap(|s| s.sub_vars(&sub_env));
                 (new_id, body)
             } else {
                 vars.insert(var.clone());
@@ -1098,9 +1093,8 @@ fn innermost_body_contains_host_call(
         [Stmt::For {body, ..}] => {
             innermost_body_contains_host_call(body, &host_functions)
         }
-        [Stmt::Expr {e: Expr::Call {id, ..}, ..}] => {
-            host_functions.contains(id)
-        },
+        [Stmt::Expr {e: Expr::Call {id, ..}, ..}] => host_functions.contains(id),
+        [Stmt::Expr {e: Expr::PyCallback {..}, ..}] => true,
         _ => false,
     }
 }

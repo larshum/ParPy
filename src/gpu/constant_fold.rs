@@ -87,8 +87,10 @@ fn fold_expr(e: Expr) -> Expr {
         },
         Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
         Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
-        Expr::ArrayAccess {..} | Expr::Call {..} | Expr::Struct {..} |
-        Expr::ThreadIdx {..} | Expr::BlockIdx {..} => e.smap(fold_expr)
+        Expr::ArrayAccess {..} | Expr::Call {..} | Expr::PyCallback {..} |
+        Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
+            e.smap(fold_expr)
+        }
     }
 }
 
@@ -218,7 +220,7 @@ fn fold_top(top: Top) -> Top {
             let body = fold_stmts(body);
             Top::FunDef {ret_ty, id, params, body, target, i}
         },
-        Top::ExtDecl {..} | Top::StructDef {..} | Top::CallbackDecl {..} => top
+        Top::ExtDecl {..} | Top::StructDef {..} => top
     }
 }
 

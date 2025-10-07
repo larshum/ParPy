@@ -33,12 +33,11 @@ fn replace_constants_expr(
                 Expr::Subscript {target, idx, ty: ty.clone(), i: i.clone()}
             }
         },
-        Expr::String {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
-        Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
-        Expr::IfExpr {..} | Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
-        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Inline {..} |
-        Expr::Label {..} | Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
-        Expr::StaticFail {..} => {
+        Expr::String {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} | Expr::UnOp {..} |
+        Expr::BinOp {..} | Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Slice {..} |
+        Expr::Tuple {..} | Expr::List {..} | Expr::Call {..} | Expr::Callback {..} |
+        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Inline {..} | Expr::Label {..} |
+        Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
             e.smap(|e| replace_constants_expr(consts, e))
         }
     }

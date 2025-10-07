@@ -98,7 +98,7 @@ def _check_kwargs(kwargs, fun_name):
 
     return opts
 
-def _compile_function(ir_ast, args, opts):
+def _compile_function(ir_ast, args, vars, opts):
     from .compile import build_shared_library, get_wrapper
     from .key import _generate_fast_cache_key, _generate_function_key
 
@@ -116,7 +116,7 @@ def _compile_function(ir_ast, args, opts):
     # Generate the code based on the provided IR AST, arguments and compilation
     # options.
     top_map = _get_tops(opts.backend)
-    code, unsymb_code = parpy.compile_ir(ir_ast, args, opts, top_map)
+    argtypes, callbacks, code, unsymb_code = parpy.compile_ir(ir_ast, args, opts, top_map)
 
     # If the shared library corresponding to the generated code does not exist,
     # we run the underlying compiler to produce a shared library.
@@ -125,7 +125,7 @@ def _compile_function(ir_ast, args, opts):
 
     # Return a wrapper function which ensures the arguments are correctly
     # passed to the exposed shared library function.
-    wrap_fn = get_wrapper(name, cache_key, opts)
+    wrap_fn = get_wrapper(name, cache_key, argtypes, vars, callbacks)
     _fun_cache[fast_cache_key] = wrap_fn
     return wrap_fn
 
@@ -157,14 +157,14 @@ def compile_string(fun_name, code, opts=CompileOptions()):
     Compiles the code provided as a string and returns a wrapper to the
     entry point function with the specified name.
     """
-    from .compile import build_shared_library, get_wrapper
+    from .compile import build_shared_library, get_string_wrapper
     from .key import _generate_function_key
     from .validate import check_arguments
     import functools
     opts = backend._resolve_backend(opts, True)
     cache_key = "string_" + _generate_function_key(code, opts)
     build_shared_library(cache_key, code, opts)
-    fn = get_wrapper(fun_name, cache_key, opts)
+    fn = get_string_wrapper(fun_name, cache_key, opts)
     @functools.wraps(fn)
     def inner(*args):
         args = check_arguments(args, opts, True)
@@ -189,7 +189,7 @@ def print_compiled(fun, args, opts=CompileOptions()):
         ir_ast = _convert_python_function_to_ir(fun, vars)
     args = check_arguments(args, opts, False)
     top_map = _get_tops(opts.backend)
-    code, _ = parpy.compile_ir(ir_ast, args, opts, top_map)
+    _, _, code, _ = parpy.compile_ir(ir_ast, args, opts, top_map)
     return code
 
 def callback(fn):
@@ -239,6 +239,6 @@ def jit(fun):
     def inner(*args, **kwargs):
         opts = backend._resolve_backend(_check_kwargs(kwargs, fun.__name__), True)
         args = check_arguments(args, opts, True)
-        _compile_function(ir_ast, args, opts)(*args)
+        _compile_function(ir_ast, args, vars, opts)(*args)
     _ir_asts[inner] = ir_ast
     return inner
