@@ -594,7 +594,7 @@ mod test {
     #[test]
     fn print_buffer_param() {
         let p = Param {id: id("x"), ty: Type::Buffer, attr: Some(ParamAttribute::Buffer {idx: 0})};
-        assert_eq!(p.pprint_default(), "MTL::Buffer* x [[buffer(0)]]");
+        assert_eq!(p.pprint_default(), "metal_buffer* x [[buffer(0)]]");
     }
 
     #[test]
@@ -636,7 +636,7 @@ mod test {
             ty: scalar(ElemSize::F32),
             i: Info::default(),
         };
-        assert_eq!(e.pprint_default(), "((float*)x->contents())[1]");
+        assert_eq!(e.pprint_default(), "((float*)x->buf->contents())[1]");
     }
 
     #[test]
