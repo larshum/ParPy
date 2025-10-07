@@ -56,7 +56,7 @@ fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv,
             let args = args.into_iter().join(", ");
             pprint_type(format!("{decl}({args})"), result, env)
         },
-        Type::MTLBuffer => join_space("MTL::Buffer".to_string(), decl, env),
+        Type::MTLBuffer => join_space("metal_buffer".to_string(), decl, env),
         Type::MTLFunction => join_space("MTL::Function".to_string(), decl, env),
         Type::MTLLibrary => join_space("MTL::Library".to_string(), decl, env),
         Type::Uint3 => join_space("uint3".to_string(), decl, env),
@@ -184,7 +184,7 @@ impl PrettyPrint for Expr {
                 let (env, ty) = ty.pprint(env);
                 let (env, target) = target.pprint(env);
                 let (env, idx) = idx.pprint(env);
-                (env, format!("(({ty}*){target}->contents())[{idx}]"))
+                (env, format!("(({ty}*){target}->buf->contents())[{idx}]"))
             },
             Expr::Call {id, args, ..} => {
                 let (env, id) = id.pprint(env);
@@ -670,7 +670,7 @@ mod test {
             ty: scalar(ElemSize::F32),
             i: Info::default(),
         };
-        assert_eq!(e.pprint_default(), "((float*)x->contents())[1]");
+        assert_eq!(e.pprint_default(), "((float*)x->buf->contents())[1]");
     }
 
     #[test]

@@ -40,7 +40,7 @@ def test_metal_catch_runtime_error():
 #include "parpy_metal.h"
 extern "C"
 int32_t f() {
-    MTL::Buffer *buf;
+    metal_buffer *buf;
     parpy_metal_check_error(parpy_metal::alloc(&buf, -1));
     return 0;
 }

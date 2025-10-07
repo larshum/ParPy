@@ -73,6 +73,7 @@ def _compile_metal_runtime_lib():
     lib.parpy_init.argtypes = [ctypes.c_int64]
     lib.parpy_ptr_buffer.argtypes = [ctypes.c_void_p]
     lib.parpy_ptr_buffer.restype = ctypes.c_void_p
+    lib.parpy_buffer_set_offset.argtypes = [ctypes.c_void_p, ctypes.c_int64]
     lib.parpy_init(DEFAULT_METAL_COMMAND_QUEUE_SIZE)
     return lib
 
