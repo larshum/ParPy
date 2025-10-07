@@ -143,26 +143,30 @@ def from_raw(ptr, shape, dtype, backend):
         raise ValueError(f"Cannot convert raw data to buffer of unknown backend {backend}")
 
 class BaseBuffer:
-    def __init__(self, buf, nbytes, src):
+    def __init__(self, buf, nbytes, src, is_raw):
         if type(self) is BaseBuffer:
             raise RuntimeError(f"Cannot construct instance of BaseBuffer class")
         self.buf = buf
         self.nbytes = nbytes
         self.src = src
+        self.is_raw = is_raw
 
     def __del__(self):
-        if self.src is not None:
-            src_ptr, _, _ = _extract_array_interface(self.src)
-        else:
-            src_ptr = None
-        self._deconstruct(src_ptr)
+        # We skip running the deconstructor for a buffer constructed from raw
+        # data, as this will be handled in the original buffer.
+        if not self.is_raw:
+            if self.src is not None:
+                src_ptr, _, _ = _extract_array_interface(self.src)
+            else:
+                src_ptr = None
+            self._deconstruct(src_ptr)
 
     def _deconstruct(self, src_ptr):
         pass
 
 class CudaBaseBuffer(BaseBuffer):
-    def __init__(self, buf, nbytes, src=None):
-        super().__init__(buf, nbytes, src)
+    def __init__(self, buf, nbytes, src=None, is_raw=False):
+        super().__init__(buf, nbytes, src, is_raw)
 
     def _deconstruct(self, src_ptr):
         if src_ptr is not None:
@@ -205,14 +209,14 @@ class CudaBaseBuffer(BaseBuffer):
                 self.__cuda_array_interface__ = _to_array_interface(ptr, shape, dtype)
         buf = torch.as_tensor(dummy(), device='cuda')
         nbytes = _size(shape, dtype)
-        return CudaBaseBuffer(buf, nbytes)
+        return CudaBaseBuffer(buf, nbytes, is_raw=True)
 
     def copy(self):
         return CudaBaseBuffer(self.buf.detach().clone(), self.nbytes)
 
 class MetalBaseBuffer(BaseBuffer):
-    def __init__(self, buf, nbytes, src=None):
-        super().__init__(buf, nbytes, src)
+    def __init__(self, buf, nbytes, src=None, is_raw=False):
+        super().__init__(buf, nbytes, src, is_raw)
 
     def _deconstruct(self, src_ptr):
         self.sync()
@@ -242,7 +246,7 @@ class MetalBaseBuffer(BaseBuffer):
     def from_raw(ptr, shape, dtype):
         # This assumes the provided raw pointer points to a MTL::Buffer
         nbytes = _size(shape, dtype)
-        return MetalBaseBuffer(ptr, nbytes)
+        return MetalBaseBuffer(ptr, nbytes, is_raw=True)
 
 class Buffer:
     def __init__(self, buf, shape, dtype, buf_offset):
@@ -360,23 +364,6 @@ class CudaBuffer(Buffer):
     def from_raw(ptr, shape, dtype):
         buf = CudaBaseBuffer.from_raw(ptr, shape, dtype)
         return CudaBuffer(buf, shape, dtype)
-
-    def _raw_idx(self, *indices):
-        import math
-        if self.raw:
-            if len(indices) < len(self.shape):
-                new_buf = self.buf
-                for i, idx in enumerate(indices):
-                    new_buf += idx * math.prod(self.shape[i+1:]) * self.dtype.size()
-                return CudaBuffer(
-                    new_buf, self.shape[len(indices):], self.dtype, raw=True
-                )
-            elif len(indices) == len(self.shape):
-                return self.torch()[indices]
-            else:
-                raise RuntimeError(f"Invalid index {indices} into buffer of shape {self.shape}")
-        else:
-            raise RuntimeError(f"Cannot index into non-raw tensor")
 
     def numpy(self):
         import numpy as np
