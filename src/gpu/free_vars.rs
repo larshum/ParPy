@@ -7,50 +7,6 @@ use crate::utils::smap::SFold;
 
 use std::collections::BTreeMap;
 
-fn copy_as_py_env(env: &FVEnv<Type>) -> FVEnv<py_ast::Type> {
-    let mut py_env = FVEnv::<py_ast::Type>::default();
-    let insert_id = |env: &mut BTreeMap<Name, py_ast::Type>, id: &Name| {
-        env.insert(id.clone(), py_ast::Type::Void);
-    };
-    env.bound.iter().for_each(|(id, _)| insert_id(&mut py_env.bound, id));
-    env.free.iter().for_each(|(id, _)| insert_id(&mut py_env.free, id));
-    py_env
-}
-
-fn convert_to_gpu_type(py_type: py_ast::Type) -> Type {
-    // NOTE(larshum, 2025-10-06): We use 'Void' to represent any type we cannot immediately
-    // translate from the Python AST to the GPU AST. As this is currently only used for
-    // callback functions, where we only expect tensor arguments, this should be fine.
-    match py_type {
-        py_ast::Type::Tensor {sz, shape} => {
-            match sz {
-                py_ast::TensorElemSize::Fixed {sz} => {
-                    if shape.is_empty() {
-                        Type::Scalar {sz}
-                    } else {
-                        let ty = Box::new(Type::Scalar {sz});
-                        Type::Pointer {ty, mem: MemSpace::Device}
-                    }
-                },
-                py_ast::TensorElemSize::Variable {..} => Type::Void
-            }
-        },
-        py_ast::Type::Void => Type::Void,
-        _ => Type::Void,
-    }
-}
-
-fn add_to_gpu_env(mut env: FVEnv<Type>, py_env: FVEnv<py_ast::Type>) -> FVEnv<Type> {
-    let add_entry_if_new = |env: &mut BTreeMap<Name, Type>, id: Name, py_type: py_ast::Type| {
-        env.entry(id).or_insert_with(|| convert_to_gpu_type(py_type));
-    };
-    py_env.bound.into_iter()
-        .for_each(|(id, py_type)| add_entry_if_new(&mut env.bound, id, py_type));
-    py_env.free.into_iter()
-        .for_each(|(id, py_type)| add_entry_if_new(&mut env.free, id, py_type));
-    env
-}
-
 impl FreeVars<py_ast::Type> for Expr {
     fn fv(&self, env: FVEnv<py_ast::Type>) -> FVEnv<py_ast::Type> {
         match self {
@@ -104,17 +60,11 @@ impl FreeVars<Type> for Expr {
     fn fv(&self, env: FVEnv<Type>) -> FVEnv<Type> {
         match self {
             Expr::Var {id, ty, ..} => use_variable(env, &id, &ty),
-            Expr::PyCallback {args, ..} => {
-                let py_env = copy_as_py_env(&env);
-                let py_env = args.sfold(py_env, |env, e: &py_ast::Expr| e.fv(env));
-                let env = add_to_gpu_env(env, py_env);
-                env
-            },
             Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
             Expr::UnOp {..} | Expr::BinOp {..} | Expr::IfExpr {..} |
             Expr::StructFieldAccess {..} | Expr::ArrayAccess {..} |
-            Expr::Call {..} | Expr::Convert {..} | Expr::Struct {..} |
-            Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
+            Expr::Call {..} | Expr::PyCallback {..} | Expr::Convert {..} |
+            Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
                 self.sfold(env, |env, e| e.fv(env))
             }
         }
@@ -155,4 +105,74 @@ impl FreeVars<Type> for Stmt {
 pub fn free_variables(s: &Vec<Stmt>) -> BTreeMap<Name, Type> {
     let env = s.sfold(FVEnv::default(), |env, s| s.fv(env));
     env.free
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::gpu::ast_builder::*;
+    use crate::test::*;
+
+    use std::fmt::Debug;
+
+    fn mk_fv_env<T>(bound: Vec<(Name, T)>, free: Vec<(Name, T)>) -> FVEnv<T> {
+        FVEnv {
+            bound: bound.into_iter().collect::<BTreeMap<Name, T>>(),
+            free: free.into_iter().collect::<BTreeMap<Name, T>>()
+        }
+    }
+
+    fn assert_eq_fv_env<T: Debug + PartialEq>(
+        env: FVEnv<T>,
+        bound: Vec<(Name, T)>,
+        free: Vec<(Name, T)>
+    ) {
+        let env_bound = env.bound.into_iter().collect::<Vec<(Name, T)>>();
+        assert_eq!(env_bound, bound);
+        let env_free = env.free.into_iter().collect::<Vec<(Name, T)>>();
+        assert_eq!(env_free, free);
+    }
+
+    #[test]
+    fn free_vars_unbound_var() {
+        let ty = Type::Scalar {sz: ElemSize::I32};
+        let e = Expr::Var {id: id("x"), ty: ty.clone(), i: i()};
+        let env = e.fv(FVEnv::<Type>::default());
+        assert_eq_fv_env(env, vec![], vec![(id("x"), ty)]);
+    }
+
+    #[test]
+    fn free_vars_bound_var() {
+        let ty = Type::Scalar {sz: ElemSize::I32};
+        let e = Expr::Var {id: id("x"), ty: ty.clone(), i: i()};
+        let env = mk_fv_env(vec![(id("x"), ty.clone())], vec![]);
+        assert_eq_fv_env(e.fv(env), vec![(id("x"), ty)], vec![]);
+    }
+
+    #[test]
+    fn free_vars_addition() {
+        let ty = Type::Scalar {sz: ElemSize::I32};
+        let e = Expr::BinOp {
+            lhs: Box::new(Expr::Var {id: id("x"), ty: ty.clone(), i: i()}),
+            op: BinOp::Add,
+            rhs: Box::new(Expr::Var {id: id("y"), ty: ty.clone(), i: i()}),
+            ty: ty.clone(),
+            i: i()
+        };
+        let env = mk_fv_env(vec![], vec![]);
+        assert_eq_fv_env(e.fv(env), vec![], vec![(id("x"), ty.clone()), (id("y"), ty)]);
+    }
+
+    #[test]
+    fn free_vars_bound_in_def() {
+        let ty = Type::Scalar {sz: ElemSize::I32};
+        let s = Stmt::Definition {
+            ty: ty.clone(),
+            id: id("x"),
+            expr: Expr::Int {v: 1, ty: ty.clone(), i: i()},
+            i: i()
+        };
+        let env = mk_fv_env(vec![], vec![]);
+        assert_eq_fv_env(s.fv(env), vec![(id("x"), ty)], vec![]);
+    }
 }

@@ -1,6 +1,5 @@
 use crate::parpy_compile_error;
 use crate::gpu::ast::*;
-use crate::gpu::free_vars;
 use crate::py::ast as py_ast;
 use crate::utils::ast::ExprType;
 use crate::utils::err::*;

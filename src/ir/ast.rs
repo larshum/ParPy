@@ -10,8 +10,6 @@ pub use crate::utils::ast::UnOp;
 pub use crate::utils::ast::BinOp;
 pub use crate::utils::ast::Target;
 
-use std::collections::BTreeMap;
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum Type {
     Tensor {sz: ElemSize, shape: Vec<i64>},

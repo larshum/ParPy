@@ -9,8 +9,6 @@ pub use crate::utils::ast::UnOp;
 pub use crate::utils::ast::BinOp;
 pub use crate::utils::ast::Target;
 
-use std::collections::BTreeMap;
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum MemSpace {
     // Memory allocated on the host (CPU)

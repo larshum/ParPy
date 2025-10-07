@@ -4,7 +4,6 @@ mod extract_callbacks;
 
 use crate::gpu::ast as gpu_ast;
 use crate::option::CompileOptions;
-use crate::py::ast as py_ast;
 use crate::utils::pprint::PrettyPrint;
 
 use pyo3::prelude::*;
