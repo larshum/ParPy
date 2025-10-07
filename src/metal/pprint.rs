@@ -484,7 +484,7 @@ mod test {
             ty: Box::new(scalar(ElemSize::F32)),
             mem: MemSpace::Host
         };
-        assert_eq!(ty.pprint_default(), "float (*)");
+        assert_eq!(ty.pprint_default(), "float *");
     }
 
     #[test]
@@ -494,7 +494,7 @@ mod test {
             mem: MemSpace::Host
         };
         let (_, s) = pprint_type("x".to_string(), &ty, PrettyPrintEnv::default());
-        assert_eq!(s, "float (*x)");
+        assert_eq!(s, "float *x");
     }
 
     #[test]
@@ -503,7 +503,7 @@ mod test {
             ty: Box::new(scalar(ElemSize::F32)),
             mem: MemSpace::Device,
         };
-        assert_eq!(ty.pprint_default(), "float device (*)");
+        assert_eq!(ty.pprint_default(), "device float *");
     }
 
     #[test]
