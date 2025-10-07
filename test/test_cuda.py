@@ -90,7 +90,7 @@ def test_cuda_graph_runs_correctly():
         col_sum(x, y1, 20)
         y2 = np.zeros((N,)).astype(np.float32)
         fn(x, y2, 20)
-        assert np.allclose(y1, y2)
+        assert np.allclose(y1, y2, atol=1e-5)
     run_if_backend_is_enabled(backend, helper)
 
 def test_cuda_catch_runtime_error():

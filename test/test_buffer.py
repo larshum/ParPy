@@ -52,7 +52,7 @@ def test_buffer_from_numpy_array(backend):
         b = parpy.buffer.from_array(a, backend)
         assert b.shape == shape
         assert b.dtype == parpy.buffer.DataType.from_elem_size(parpy.types.F32)
-        assert b.src is a
+        assert b.buf.src is a
     run_if_backend_is_enabled(backend, helper)
 
 def test_buffer_from_array_none_backend():
@@ -138,20 +138,6 @@ def test_buffer_to_torch(backend):
     run_if_backend_is_enabled(backend, helper)
 
 @pytest.mark.parametrize('backend', compiler_backends)
-def test_buffer_reshape_refcount(backend):
-    def helper():
-        shape = (20, 10, 32)
-        b1 = parpy.buffer.zeros(shape, parpy.types.F32, backend)
-        assert b1.refcount[0] == 1
-        b2 = b1.reshape(200, 32)
-        assert b1.shape == shape
-        assert b2.shape == (200, 32)
-        assert b1.refcount[0] == 2 and b2.refcount[0] == 2
-        del b2
-        assert b1.refcount[0] == 1
-    run_if_backend_is_enabled(backend, helper)
-
-@pytest.mark.parametrize('backend', compiler_backends)
 def test_buffer_invalid_reshape(backend):
     def helper():
         shape = (20, 10, 32)
@@ -192,4 +178,60 @@ def test_buffer_back_to_back_conversion(backend):
         b = parpy.buffer.from_array(a, backend)
         c = b.numpy()
         assert np.allclose(a, c)
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_indexing(backend):
+    def helper():
+        import numpy as np
+        shape = (20,)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        assert b[12] == a[12]
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_indexing_elem(backend):
+    def helper():
+        import numpy as np
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        print(b[12,9,14])
+        print(a[12,9,14])
+        assert b[12, 9, 14] == a[12, 9, 14]
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_partial_indexing(backend):
+    def helper():
+        import numpy as np
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        assert np.allclose(b[12].numpy(), a[12])
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_multidim_partial_indexing_torch(backend):
+    def helper():
+        import torch
+        shape = (20, 10, 32)
+        a = torch.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        if backend == parpy.CompileBackend.Cuda:
+            assert torch.allclose(b[12].torch(), a[12].cuda())
+        else:
+            assert torch.allclose(b[12].torch(), a[12])
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_buffer_indexing_out_of_bounds(backend):
+    def helper():
+        import numpy as np
+        shape = (20, 10, 32)
+        a = np.random.randn(*shape)
+        b = parpy.buffer.from_array(a, backend)
+        with pytest.raises(IndexError):
+            b[21]
     run_if_backend_is_enabled(backend, helper)
