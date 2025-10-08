@@ -303,8 +303,13 @@ impl PrettyPrint for Param {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
         let Param {id, ty, ..} = self;
         let (env, id) = id.pprint(env);
-        let (env, ty) = ty.pprint(env);
-        (env, format!("{id}: {ty}"))
+        match ty {
+            Type::Unknown => (env, id),
+            _ => {
+                let (env, ty) = ty.pprint(env);
+                (env, format!("{id}: {ty}"))
+            }
+        }
     }
 }
 
@@ -316,8 +321,14 @@ impl PrettyPrint for FunDef {
         let env = env.incr_indent();
         let (env, body) = pprint_iter(body.iter(), env, "\n");
         let env = env.decr_indent();
-        let (env, res_ty) = res_ty.pprint(env);
-        (env, format!("def {id}({params}) -> {res_ty}:\n{body}"))
+        let (env, res_str) = match res_ty {
+            Type::Unknown | Type::Void => (env, "".to_string()),
+            _ => {
+                let (env, res_ty) = res_ty.pprint(env);
+                (env, format!(" -> {res_ty}"))
+            }
+        };
+        (env, format!("def {id}({params}){res_str}:\n{body}"))
     }
 }
 
@@ -614,6 +625,18 @@ mod test {
     }
 
     #[test]
+    fn print_param_unknown_type() {
+        let p = Param {id: id("x"), ty: Type::Unknown, i: i()};
+        assert_eq!(p.pprint_default(), "x");
+    }
+
+    #[test]
+    fn print_param_known_type() {
+        let p = Param {id: id("x"), ty: scalar(ElemSize::I32), i: i()};
+        assert_eq!(p.pprint_default(), "x: parpy.types.I32");
+    }
+
+    #[test]
     fn print_fun_def() {
         let value = binop(
             var("x", scalar(ElemSize::F32)),
@@ -637,5 +660,17 @@ mod test {
         };
         let expected = "def f(x: parpy.types.F32, y: parpy.types.I32) -> parpy.types.F32:\n  return x + parpy.types.F32(y)";
         assert_eq!(def.pprint_default(), expected);
+    }
+
+    #[test]
+    fn print_fun_def_void_return() {
+        let def = FunDef {
+            id: id("f"),
+            params: vec![],
+            body: vec![Stmt::Return {value: uint(0), i: i()}],
+            res_ty: Type::Void,
+            i: i()
+        };
+        assert_eq!(def.pprint_default(), "def f():\n  return 0");
     }
 }
