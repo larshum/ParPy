@@ -2,7 +2,7 @@ pub mod ast;
 mod codegen;
 mod constant_fold;
 pub mod flatten_structs;
-pub mod free_vars;
+mod free_vars;
 mod global_mem;
 mod inter_block;
 mod par;
