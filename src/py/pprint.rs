@@ -327,7 +327,9 @@ impl PrettyPrint for Top {
             Top::CallbackDecl {id, params, i: _} => {
                 let (env, id) = id.pprint(env);
                 let (env, params) = pprint_iter(params.iter(), env, ", ");
+                let env = env.incr_indent();
                 let indent = env.print_indent();
+                let env = env.decr_indent();
                 (env, format!("def {id}({params}):\n{indent}<callback>"))
             },
             Top::ExtDecl {id, ext_id, params, res_ty, header, target, par, i: _} => {
