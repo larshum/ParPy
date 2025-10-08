@@ -24,7 +24,7 @@ impl DebugEnv {
     ) -> String {
         let now = time::Instant::now();
         let t = now.duration_since(start).as_micros();
-        format!("{0} {msg} (time: {1} us) {0}\n{2}", bounds, t, ast.pprint_default())
+        format!("{0} {msg} (time: {1} us) {0}\n{2}\n", bounds, t, ast.pprint_default())
     }
 
     pub fn print<T: PrettyPrint>(&self, msg: &str, ast: &T) {
