@@ -69,6 +69,9 @@ fn from_ir_expr(e: ir_ast::Expr) -> CompileResult<Expr> {
                 .collect::<CompileResult<Vec<Expr>>>()?;
             Ok(Expr::Call {id, args, ty, i})
         },
+        ir_ast::Expr::PyCallback {id, args, i, ..} => {
+            Ok(Expr::PyCallback {id, args, ty, i})
+        },
         ir_ast::Expr::Convert {e, ..} => {
             let e = Box::new(from_ir_expr(*e)?);
             Ok(Expr::Convert {e, ty})
@@ -421,7 +424,8 @@ fn from_ir_stmt(
                     }
                     let kernel = Top::KernelFunDef {
                         attrs, id: kernel_id.clone(),
-                        params: kernel_params, body: kernel_body
+                        params: kernel_params, body: kernel_body,
+                        i: i.clone()
                     };
                     kernels.push(kernel);
                     let args = fv.into_iter()
@@ -555,7 +559,7 @@ fn from_ir_main_def(
     env: &CodegenEnv,
     fun: ir_ast::FunDef,
 ) -> CompileResult<Vec<Top>> {
-    let ir_ast::FunDef {id, params, body, ..} = fun;
+    let ir_ast::FunDef {id, params, body, i, ..} = fun;
     let params = params.into_iter()
         .map(from_ir_param)
         .collect::<Vec<Param>>();
@@ -564,11 +568,11 @@ fn from_ir_main_def(
     body.append(&mut host_body);
     let ret_ty = Type::Scalar {sz: ElemSize::I32};
     body.push(Stmt::Return {
-        value: Expr::Int {v: 0, ty: ret_ty.clone(), i: Info::default()},
-        i: Info::default()
+        value: Expr::Int {v: 0, ty: ret_ty.clone(), i: i.clone()},
+        i: i.clone()
     });
     kernel_tops.push(Top::FunDef {
-        ret_ty, id, params: unwrapped_params, body, target: Target::Host
+        ret_ty, id, params: unwrapped_params, body, target: Target::Host, i
     });
     Ok(kernel_tops)
 }
@@ -583,24 +587,24 @@ fn from_ir_top(
     t: ir_ast::Top
 ) -> CompileResult<(CodegenEnv, Top)> {
     match t {
-        ir_ast::Top::StructDef {id, fields, ..} => {
+        ir_ast::Top::StructDef {id, fields, i} => {
             let fields = fields.into_iter()
                 .map(from_ir_field)
                 .collect::<Vec<Field>>();
             env.struct_fields.insert(id.clone(), fields.clone());
-            Ok((env, Top::StructDef {id, fields}))
+            Ok((env, Top::StructDef {id, fields, i}))
         },
-        ir_ast::Top::ExtDecl {id, ext_id, params, res_ty, target, header, i: _} => {
+        ir_ast::Top::ExtDecl {id, ext_id, params, res_ty, target, header, i} => {
             let params = from_ir_params(params);
             let ret_ty = from_ir_type(res_ty);
-            Ok((env, Top::ExtDecl {ret_ty, id, ext_id, params, target, header}))
+            Ok((env, Top::ExtDecl {ret_ty, id, ext_id, params, target, header, i}))
         },
         ir_ast::Top::FunDef {v: ir_ast::FunDef {id, params, body, res_ty, i}} => {
             let params = from_ir_params(params);
             let ret_ty = from_ir_type(res_ty);
             let (body, kernel_tops) = from_ir_stmts(&env, &id, vec![], vec![], body)?;
             if kernel_tops.is_empty() {
-                Ok((env, Top::FunDef {ret_ty, id, params, body, target: Target::Device}))
+                Ok((env, Top::FunDef {ret_ty, id, params, body, target: Target::Device, i}))
             } else {
                 parpy_compile_error!(
                     i,
@@ -1057,7 +1061,7 @@ mod test {
         let (_, top) = from_ir_top(env, ir_ast::Top::FunDef {v}).unwrap();
         let expected = Top::FunDef {
             ret_ty: Type::Void, id: id("f"), params: vec![], body: vec![],
-            target: Target::Device
+            target: Target::Device, i: i()
         };
         assert_eq!(top, expected);
     }
@@ -1076,7 +1080,8 @@ mod test {
             id: id("f"),
             params: vec![],
             body: vec![Stmt::Return {value: int(0, Some(ElemSize::I32)), i: i()}],
-            target: Target::Host
+            target: Target::Host,
+            i: i()
         };
         assert_eq!(tops.pop().unwrap(), expected);
     }

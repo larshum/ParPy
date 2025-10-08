@@ -1,3 +1,4 @@
+mod callbacks;
 mod cuda;
 mod ext;
 mod gpu;
@@ -36,6 +37,17 @@ fn python_to_ir<'py>(
 }
 
 #[pyfunction]
+fn declare_callback<'py>(
+    py_ast: Bound<'py, PyAny>,
+    info: (String, usize, usize),
+    vars: (Bound<'py, PyDict>, Bound<'py, PyDict>),
+    py: Python<'py>
+) -> PyResult<Bound<'py, PyCapsule>> {
+    let t = py::convert_callback(py_ast, info, vars)?;
+    Ok(PyCapsule::new::<py::ast::Top>(py, t, None)?)
+}
+
+#[pyfunction]
 fn declare_external<'py>(
     py_ast: Bound<'py, PyAny>,
     info: (String, usize, usize),
@@ -64,6 +76,7 @@ fn get_function_name<'py>(cap: Bound<'py, PyCapsule>) -> String {
         cap.reference()
     };
     match untyped_def {
+        py::ast::Top::CallbackDecl {id, ..} |
         py::ast::Top::ExtDecl {id, ..} |
         py::ast::Top::FunDef {v: py::ast::FunDef {id, ..}} => id.get_str().clone(),
     }
@@ -74,8 +87,9 @@ fn compile_ir<'py>(
     cap: Bound<'py, PyCapsule>,
     args: Vec<Bound<'py, PyAny>>,
     opts: option::CompileOptions,
-    ir_asts: BTreeMap<String, Bound<'py, PyCapsule>>
-) -> PyResult<(String, String)> {
+    ir_asts: BTreeMap<String, Bound<'py, PyCapsule>>,
+    py: Python<'py>
+) -> PyResult<(Vec<Bound<'py, PyAny>>, Vec<String>, String, String)> {
     // Extract a reference to the untyped AST parsed earlier.
     let t: &py::ast::Top = unsafe { cap.reference() };
 
@@ -95,19 +109,47 @@ fn compile_ir<'py>(
     let ir_ast = ir::from_python(py_ast, &opts, &debug_env)?;
     debug_env.print("IR AST", &ir_ast);
 
+    // Convert the IR AST to a GPU AST. The main difference between these two ASTs is that the GPU
+    // AST distinguishes between code running on the host (CPU) and on the device (GPU). Further,
+    // it includes constructs exclusive to GPU programming, such as thread and block indexing and
+    // statements representing the allocation of shared memory.
+    let gpu_ast = gpu::from_general_ir(ir_ast, &opts, &debug_env)?;
+
+    // Extracts the callback functions used in the GPU AST and produces separate ASTs for these.
+    // The result consists of three parts:
+    // - A complete list of the argument types (as Ctypes types) of the entry point, including the
+    //   callback functions.
+    // - A list of Python ASTs (in the form of a function definition) representing a wrapper to
+    //   each callback function, which wraps pointer arguments as a ParPy buffer (keeping track of
+    //   its type and shape) and repeatedly calls the user-provided callback function, to minimize
+    //   the overhead of argument wrapping.
+    // - The updated GPU AST, with callback functions as arguments to the entry point function.
+    let (argtypes, callback_asts, gpu_ast) = callbacks::from_gpu_ast(&opts, gpu_ast, py)?;
+    debug_env.print("GPU AST after callback conversion", &gpu_ast);
+
     // Compile using the backend-specific approach to code generation. In the end, we pretty-print
     // the AST with and without symbols. The latter is used as a key to the cache - if only the
     // symbols differ between two ASTs, they should be considered equivalent.
     match opts.backend {
         option::CompileBackend::Cuda => {
-            let ast = cuda::codegen(ir_ast, &opts, &debug_env)?;
+            let ast = cuda::codegen(gpu_ast, &opts)?;
             debug_env.print("CUDA AST", &ast);
-            Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
+            Ok((
+                argtypes,
+                callback_asts,
+                ast.pprint_default(),
+                ast.pprint_ignore_symbols()
+            ))
         },
         option::CompileBackend::Metal => {
-            let ast = metal::codegen(ir_ast, &opts, &debug_env)?;
+            let ast = metal::codegen(gpu_ast)?;
             debug_env.print("Metal AST", &ast);
-            Ok((ast.pprint_default(), ast.pprint_ignore_symbols()))
+            Ok((
+                argtypes,
+                callback_asts,
+                ast.pprint_default(),
+                ast.pprint_ignore_symbols()
+            ))
         },
         option::CompileBackend::Auto => {
             Err(PyRuntimeError::new_err("Internal error: Auto backend should \
@@ -120,6 +162,7 @@ fn compile_ir<'py>(
 #[pymodule]
 fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python_to_ir, m)?)?;
+    m.add_function(wrap_pyfunction!(declare_callback, m)?)?;
     m.add_function(wrap_pyfunction!(declare_external, m)?)?;
     m.add_function(wrap_pyfunction!(print_ast, m)?)?;
     m.add_function(wrap_pyfunction!(get_function_name, m)?)?;

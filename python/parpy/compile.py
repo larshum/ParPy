@@ -120,65 +120,91 @@ def build_shared_library(key, source, opts):
         else:
             raise RuntimeError(f"Cannot build for unsupported backend {opts.backend}")
 
-def get_wrapper(name, key, opts):
-    """
-    Given a key identifying a compiled shared library, this function produces a
-    wrapper with which users can call the specified low-level function while
-    providing arguments via Python.
-    """
-    from .buffer import Buffer
-    from .parpy import ScalarSizes
+# Extract the Ctype type of an argument based on its type. This is only
+# used when calling a function compiled from a string, where we do not know
+# the exact argument types beforehand (in this case, 'argtypes' is set to
+# None).
+def _get_ctype(sizes, arg):
     import ctypes
+    from .buffer import Buffer
+    if isinstance(arg, int):
+        return sizes.int.to_ctype()
+    elif isinstance(arg, float):
+        return sizes.float.to_ctype()
+    elif isinstance(arg, Buffer):
+        if len(arg.shape) == 0:
+            return arg.dtype.to_ctype()
+        else:
+            return ctypes.c_void_p
+    else:
+        raise RuntimeError(f"Argument {arg} has unsupported type {type(arg)}")
 
+# Expand arguments such that each value stored in a dictionary is passed as a
+# separate argument.
+def _expand_arg(arg):
+    if isinstance(arg, dict):
+        return [v for (_, v) in sorted(arg.items())]
+    else:
+        return [arg]
+
+def _expand_args(args):
+    if any([isinstance(arg, dict) for arg in args]):
+        exp_args = [_expand_arg(a) for a in args]
+        return [x for xs in exp_args for x in xs]
+    return args
+
+# Extract the pointers or values of buffer arguments.
+def _value_or_ptr(arg):
+    from .buffer import Buffer
+    if isinstance(arg, Buffer):
+        if len(arg.shape) == 0:
+            return arg.numpy()
+        else:
+            return arg._get_ptr()
+    else:
+        return arg
+
+def _to_callback_argument(callback_wrapper_code, ty, vars):
+    import types
+    module_code = compile(callback_wrapper_code, "<callback>", "exec")
+    code = [c for c in module_code.co_consts if isinstance(c, types.CodeType)][0]
+    globs, _ = vars
+    return ty(types.FunctionType(code, globs))
+
+def _check_status(lib, status):
+    import ctypes
+    if status != 0:
+        lib.parpy_get_error_message.restype = ctypes.c_char_p
+        msg = lib.parpy_get_error_message()
+        raise RuntimeError(f"{msg.decode('ascii')}")
+
+def get_string_wrapper(name, key, opts):
+    import ctypes
+    from .parpy import ScalarSizes
     libpath = _get_library_path(key)
     lib = ctypes.cdll.LoadLibrary(libpath)
-
-    # Determine the sizes to use for scalar values (integers and floats) based
-    # on the provided options.
+    getattr(lib, name).restype = ctypes.c_int32
     sizes = ScalarSizes(opts)
-
-    # Expand arguments such that each value stored in a dictionary is passed as a
-    # separate argument.
-    def expand_arg(arg):
-        if isinstance(arg, dict):
-            return [v for (_, v) in sorted(arg.items())]
-        else:
-            return [arg]
-
-    # Return the ctypes type of an argument.
-    def get_ctype(arg):
-        if isinstance(arg, int):
-            return sizes.int.to_ctype()
-        elif isinstance(arg, float):
-            return sizes.float.to_ctype()
-        elif isinstance(arg, Buffer):
-            if len(arg.shape) == 0:
-                return arg.dtype.to_ctype()
-            else:
-                return ctypes.c_void_p
-        else:
-            raise RuntimeError(f"Argument {arg} has unsupported type {type(arg)}")
-
-    # Extract the pointers or values of buffer arguments.
-    def value_or_ptr(arg):
-        if isinstance(arg, Buffer):
-            if len(arg.shape) == 0:
-                return arg.numpy().item()
-            else:
-                return arg._get_ptr()
-        else:
-            return arg
-
     def wrapper(*args):
-        if any([isinstance(arg, dict) for arg in args]):
-            exp_args = [expand_arg(a) for a in args]
-            args = [x for xs in exp_args for x in xs]
-        getattr(lib, name).argtypes = [get_ctype(arg) for arg in args]
-        getattr(lib, name).restype = ctypes.c_int32
-        status = getattr(lib, name)(*[value_or_ptr(arg) for arg in args])
-        if status != 0:
-            lib.parpy_get_error_message.restype = ctypes.c_char_p
-            msg = lib.parpy_get_error_message()
-            raise RuntimeError(f"{msg.decode('ascii')}")
-    wrapper.__name__ = name
+        args = _expand_args(args)
+        getattr(lib, name).argtypes = [_get_ctype(sizes, arg) for arg in args]
+        args = [_value_or_ptr(arg) for arg in args]
+        _check_status(lib, getattr(lib, name)(*args))
+    return wrapper
+
+def get_wrapper(name, key, argtypes, vars, callbacks):
+    import ctypes
+    libpath = _get_library_path(key)
+    lib = ctypes.cdll.LoadLibrary(libpath)
+    getattr(lib, name).restype = ctypes.c_int32
+    getattr(lib, name).argtypes = argtypes
+    def wrapper(*args):
+        args = _expand_args(args)
+        callback_argtypes = argtypes[len(argtypes)-len(callbacks):]
+        callback_args = [
+            _to_callback_argument(cb, ty, vars) for cb, ty in
+            zip(callbacks, callback_argtypes)
+        ]
+        args = [_value_or_ptr(arg) for arg in args] + callback_args
+        _check_status(lib, getattr(lib, name)(*args))
     return wrapper

@@ -19,11 +19,12 @@ pub enum Type {
     Void,
     Scalar {sz: ElemSize},
     Pointer {ty: Box<Type>, mem: MemSpace},
+    Function {result: Box<Type>, args: Vec<Type>},
 
     // Metal-specific types
-    Buffer,
-    Function,
-    Library,
+    MTLBufferPtr,
+    MTLFunction,
+    MTLLibrary,
     Uint3,
 }
 

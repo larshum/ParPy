@@ -267,9 +267,9 @@ fn expand_parallel_reductions_stmts(stmts: Vec<Stmt>) -> Vec<Stmt> {
 
 fn expand_parallel_reductions_top(t: Top) -> Top {
     match t {
-        Top::KernelFunDef {attrs, id, params, body} => {
+        Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = expand_parallel_reductions_stmts(body);
-            Top::KernelFunDef {attrs, id, params, body}
+            Top::KernelFunDef {attrs, id, params, body, i}
         },
         _ => t
     }

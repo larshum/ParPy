@@ -120,12 +120,11 @@ impl Symbolize for Expr {
                 let (env, ty) = ty.symbolize(env)?;
                 Ok((env, Expr::Convert {e: Box::new(e), ty, i}))
             },
-            Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
-            Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-            Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
-            Expr::Slice {..} | Expr::Tuple {..} | Expr::GpuContext {..} |
-            Expr::Inline {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
-            Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
+            Expr::String {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} | Expr::IfExpr {..} |
+            Expr::Subscript {..} | Expr::Slice {..} | Expr::Tuple {..} | Expr::List {..} |
+            Expr::Callback {..} | Expr::GpuContext {..} | Expr::Inline {..} | Expr::Label {..} |
+            Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} | Expr::StaticFail {..} => {
                 self.smap_accum_l_result(Ok(env), |env, e| e.symbolize(env))
             }
         }
@@ -199,7 +198,8 @@ impl Symbolize for FunDef {
 fn extract_top_name<'py>(t: Bound<'py, PyCapsule>) -> Name {
     let t: &Top = unsafe { t.reference() };
     match t {
-        Top::ExtDecl {id, ..} | Top::FunDef {v: FunDef {id, ..}} => id.clone()
+        Top::CallbackDecl {id, ..} | Top::ExtDecl {id, ..} |
+        Top::FunDef {v: FunDef {id, ..}} => id.clone()
     }
 }
 

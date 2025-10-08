@@ -166,7 +166,9 @@ pub enum Expr {
     Subscript {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Slice {lo: Option<Box<Expr>>, hi: Option<Box<Expr>>, ty: Type, i: Info},
     Tuple {elems: Vec<Expr>, ty: Type, i: Info},
+    List {elems: Vec<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
+    Callback {id: Name, args: Vec<Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type, i: Info},
     GpuContext {ty: Type, i: Info},
     Inline {e: Box<Expr>, ty: Type, i: Info},
@@ -191,14 +193,16 @@ impl Expr {
             Expr::Subscript {..} => 9,
             Expr::Slice {..} => 10,
             Expr::Tuple {..} => 11,
-            Expr::Call {..} => 12,
-            Expr::Convert {..} => 13,
-            Expr::GpuContext {..} => 14,
-            Expr::Inline {..} => 15,
-            Expr::Label {..} => 16,
-            Expr::StaticBackendEq {..} => 17,
-            Expr::StaticTypesEq {..} => 18,
-            Expr::StaticFail {..} => 19,
+            Expr::List {..} => 12,
+            Expr::Call {..} => 13,
+            Expr::Callback {..} => 14,
+            Expr::Convert {..} => 15,
+            Expr::GpuContext {..} => 16,
+            Expr::Inline {..} => 17,
+            Expr::Label {..} => 18,
+            Expr::StaticBackendEq {..} => 19,
+            Expr::StaticTypesEq {..} => 20,
+            Expr::StaticFail {..} => 21,
         }
     }
 
@@ -216,7 +220,9 @@ impl Expr {
             Expr::Subscript {target, idx, ty, ..} => Expr::Subscript {target, idx, ty, i},
             Expr::Slice {lo, hi, ty, ..} => Expr::Slice {lo, hi, ty, i},
             Expr::Tuple {elems, ty, ..} => Expr::Tuple {elems, ty, i},
+            Expr::List {elems, ty, ..} => Expr::List {elems, ty, i},
             Expr::Call {id, args, ty, ..} => Expr::Call {id, args, ty, i},
+            Expr::Callback {id, args, ty, ..} => Expr::Callback {id, args, ty, i},
             Expr::Convert {e, ty, ..} => Expr::Convert {e, ty, i},
             Expr::GpuContext {ty, ..} => Expr::GpuContext {ty, i},
             Expr::Inline {e, ty, ..} => Expr::Inline {e, ty, i},
@@ -243,7 +249,9 @@ impl ExprType<Type> for Expr {
             Expr::Subscript {ty, ..} => ty,
             Expr::Slice {ty, ..} => ty,
             Expr::Tuple {ty, ..} => ty,
+            Expr::List {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
+            Expr::Callback {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
             Expr::GpuContext {ty, ..} => ty,
             Expr::Inline {ty, ..} => ty,
@@ -258,12 +266,11 @@ impl ExprType<Type> for Expr {
         match self {
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
             Expr::Int {..} | Expr::Float {..} => true,
-            Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} |
-            Expr::IfExpr {..} | Expr::Subscript {..} | Expr::Slice {..} |
-            Expr::Tuple {..} | Expr::Call {..} | Expr::Convert {..} |
-            Expr::GpuContext {..} | Expr::Inline {..} | Expr::Label {..} |
-            Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
-            Expr::StaticFail {..} => false,
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::ReduceOp {..} | Expr::IfExpr {..} |
+            Expr::Subscript {..} | Expr::Slice {..} | Expr::Tuple {..} | Expr::List {..} |
+            Expr::Call {..} | Expr::Callback {..} | Expr::Convert {..} | Expr::GpuContext {..} |
+            Expr::Inline {..} | Expr::Label {..} | Expr::StaticBackendEq {..} |
+            Expr::StaticTypesEq {..} | Expr::StaticFail {..} => false,
         }
     }
 }
@@ -294,7 +301,12 @@ impl Ord for Expr {
                 llo.cmp(rlo).then(lhi.cmp(rhi)),
             (Expr::Tuple {elems: lelems, ..}, Expr::Tuple {elems: relems, ..}) =>
                 lelems.cmp(relems),
+            (Expr::List {elems: lelems, ..}, Expr::List {elems: relems, ..}) =>
+                lelems.cmp(relems),
             (Expr::Call {id: lid, args: largs, ..}, Expr::Call {id: rid, args: rargs, ..}) =>
+                lid.cmp(rid).then(largs.cmp(rargs)),
+            ( Expr::Callback {id: lid, args: largs, ..}
+            , Expr::Callback {id: rid, args: rargs, ..} ) =>
                 lid.cmp(rid).then(largs.cmp(rargs)),
             (Expr::Convert {e: le, ty: lty, ..}, Expr::Convert {e: re, ty: rty, ..}) =>
                 le.cmp(re).then(lty.cmp(rty)),
@@ -340,7 +352,9 @@ impl InfoNode for Expr {
             Expr::Subscript {i, ..} => i.clone(),
             Expr::Slice {i, ..} => i.clone(),
             Expr::Tuple {i, ..} => i.clone(),
+            Expr::List {i, ..} => i.clone(),
             Expr::Call {i, ..} => i.clone(),
+            Expr::Callback {i, ..} => i.clone(),
             Expr::Convert {i, ..} => i.clone(),
             Expr::GpuContext {i, ..} => i.clone(),
             Expr::Inline {i, ..} => i.clone(),
@@ -404,9 +418,17 @@ impl SMapAccum<Expr> for Expr {
                 let (acc, elems) = elems.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Tuple {elems, ty, i}))
             },
+            Expr::List {elems, ty, i} => {
+                let (acc, elems) = elems.smap_accum_l_result(acc, &f)?;
+                Ok((acc, Expr::List {elems, ty, i}))
+            },
             Expr::Call {id, args, ty, i} => {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Expr::Call {id, args, ty, i}))
+            },
+            Expr::Callback {id, args, ty, i} => {
+                let (acc, args) = args.smap_accum_l_result(acc, &f)?;
+                Ok((acc, Expr::Callback {id, args, ty, i}))
             },
             Expr::Convert {e, ty, i} => {
                 let (acc, e) = f(acc?, *e)?;
@@ -440,7 +462,9 @@ impl SFold<Expr> for Expr {
             Expr::Subscript {target, idx, ..} => f(f(acc?, target)?, idx),
             Expr::Slice {lo, hi, ..} => hi.sfold_result(lo.sfold_result(acc, &f), &f),
             Expr::Tuple {elems, ..} => elems.sfold_result(acc, &f),
+            Expr::List {elems, ..} => elems.sfold_result(acc, &f),
             Expr::Call {args, ..} => args.sfold_result(acc, &f),
+            Expr::Callback {args, ..} => args.sfold_result(acc, &f),
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Inline {e, ..} => f(acc?, e),
             Expr::Var {..} | Expr::String {..} | Expr::Bool {..} |
@@ -644,6 +668,7 @@ pub struct FunDef {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Top {
+    CallbackDecl {id: Name, params: Vec<Param>, i: Info},
     ExtDecl {
         id: Name, ext_id: String, params: Vec<Param>, res_ty: Type,
         target: Target, header: Option<String>, par: LoopPar, i: Info

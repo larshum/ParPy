@@ -93,7 +93,9 @@ pub fn fold_expr(e: Expr) -> Expr {
         },
         Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
         Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
-        Expr::TensorAccess {..} | Expr::Call {..} => e.smap(fold_expr)
+        Expr::TensorAccess {..} | Expr::Call {..} | Expr::PyCallback {..} => {
+            e.smap(fold_expr)
+        }
     }
 }
 

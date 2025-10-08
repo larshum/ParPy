@@ -23,25 +23,53 @@ fn memcopy_kind(src: &MemSpace, dst: &MemSpace) -> usize {
     }
 }
 
+fn pprint_type(decl: String, ty: &Type, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
+    let join_space = |fst: String, snd: String, env: PrettyPrintEnv| {
+        if snd.is_empty() {
+            (env, fst)
+        } else {
+            (env, format!("{fst} {snd}"))
+        }
+    };
+    match ty {
+        Type::Void => join_space("void".to_string(), decl, env),
+        Type::Scalar {sz} => {
+            let (env, sz) = sz.pprint(env);
+            join_space(sz, decl, env)
+        },
+        Type::Pointer {ty, mem} => {
+            let (env, mem) = mem.pprint(env);
+            let decl = match ty.as_ref() {
+                Type::Function {..} => format!("(*{decl})"),
+                _ => format!("*{decl}")
+            };
+            let (env, s) = pprint_type(decl, ty, env);
+            if mem.is_empty() {
+                (env, s)
+            } else {
+                (env, format!("{mem} {s}"))
+            }
+        },
+        Type::Function {result, args} => {
+            let (env, args) = args.iter()
+                .fold((env, vec![]), |(env, mut acc), ty| {
+                    let (env, ty) = pprint_type("".to_string(), ty, env);
+                    acc.push(ty);
+                    (env, acc)
+                });
+            let args = args.into_iter().join(", ");
+            pprint_type(format!("{decl}({args})"), result, env)
+        },
+        Type::MTLBufferPtr => join_space("metal_buffer*".to_string(), decl, env),
+        Type::MTLFunction => join_space("MTL::Function".to_string(), decl, env),
+        Type::MTLLibrary => join_space("MTL::Library".to_string(), decl, env),
+        Type::Uint3 => join_space("uint3".to_string(), decl, env),
+    }
+}
+
 impl PrettyPrint for Type {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        match self {
-            Type::Void => (env, "void".to_string()),
-            Type::Scalar {sz} => sz.pprint(env),
-            Type::Pointer {ty, mem} => {
-                let (env, ty) = ty.pprint(env);
-                let (env, mem) = mem.pprint(env);
-                if mem.is_empty() {
-                    (env, format!("{ty}*"))
-                } else {
-                    (env, format!("{mem} {ty}*"))
-                }
-            },
-            Type::Buffer => (env, "metal_buffer*".to_string()),
-            Type::Function => (env, "MTL::Function*".to_string()),
-            Type::Library => (env, "MTL::Library*".to_string()),
-            Type::Uint3 => (env, "uint3".to_string()),
-        }
+        pprint_type("".to_string(), self, env)
     }
 }
 
@@ -212,11 +240,15 @@ impl PrettyPrint for Expr {
                 // The library code is included as a string literal. We escape the end of each line
                 // with a newline to get proper errors of the generated Metal code. We also add a
                 // backslash as required for multi-line string literals.
-                let (env, tops) = pprint_iter(tops.iter(), env, "\n");
-                let tops = tops.lines()
-                    .map(|l| format!("{l}\\n\\"))
-                    .join("\n");
-                (env, format!("parpy_metal::load_library(\"\\\n{tops}\n\")"))
+                if tops.is_empty() {
+                    (env, format!("NULL"))
+                } else {
+                    let (env, tops) = pprint_iter(tops.iter(), env, "\n");
+                    let tops = tops.lines()
+                        .map(|l| format!("{l}\\n\\"))
+                        .join("\n");
+                    (env, format!("parpy_metal::load_library(\"\\\n{tops}\n\")"))
+                }
             },
         }
     }
@@ -249,10 +281,10 @@ impl PrettyPrint for Stmt {
         let indent = env.print_indent();
         match self {
             Stmt::Definition {ty, id, expr} => {
-                let (env, ty) = ty.pprint(env);
                 let (env, id) = id.pprint(env);
+                let (env, s) = pprint_type(id, ty, env);
                 let (env, expr) = expr.pprint(env);
-                (env, format!("{indent}{ty} {id} = {expr};"))
+                (env, format!("{indent}{s} = {expr};"))
             },
             Stmt::Assign {dst, expr} => {
                 let (env, dst) = dst.pprint(env);
@@ -338,12 +370,12 @@ impl PrettyPrint for Param {
         let indent = env.print_indent();
         let Param {id, ty, attr} = self;
         let (env, id) = id.pprint(env);
-        let (env, ty_str) = ty.pprint(env);
+        let (env, s) = pprint_type(id, ty, env);
         if let Some(a) = attr {
             let (env, a) = a.pprint(env);
-            (env, format!("{indent}{ty_str} {id} [[{a}]]"))
+            (env, format!("{indent}{s} [[{a}]]"))
         } else {
-            (env, format!("{indent}{ty_str} {id}"))
+            (env, format!("{indent}{s}"))
         }
     }
 }
@@ -372,15 +404,15 @@ impl PrettyPrint for Top {
                 (env, format!("#define {id}({0}) {ext_id}({0})", param_ids))
             },
             Top::VarDef {ty, id, init} => {
-                let (env, ty) = ty.pprint(env);
                 let (env, id) = id.pprint(env);
+                let (env, s) = pprint_type(id, ty, env);
                 let (env, init) = if let Some(e) = init {
                     let (env, e) = e.pprint(env);
                     (env, format!(" = {e}"))
                 } else {
                     (env, "".to_string())
                 };
-                (env, format!("{ty} {id}{init};"))
+                (env, format!("{s}{init};"))
             },
             Top::FunDef {attrs, is_kernel, ret_ty, id, params, body} => {
                 let (env, attrs) = pprint_iter(attrs.iter(), env, "\n");
@@ -456,7 +488,17 @@ mod test {
             ty: Box::new(scalar(ElemSize::F32)),
             mem: MemSpace::Host
         };
-        assert_eq!(ty.pprint_default(), "float*");
+        assert_eq!(ty.pprint_default(), "float *");
+    }
+
+    #[test]
+    fn print_named_host_pointer() {
+        let ty = Type::Pointer {
+            ty: Box::new(scalar(ElemSize::F32)),
+            mem: MemSpace::Host
+        };
+        let (_, s) = pprint_type("x".to_string(), &ty, PrettyPrintEnv::default());
+        assert_eq!(s, "float *x");
     }
 
     #[test]
@@ -465,7 +507,7 @@ mod test {
             ty: Box::new(scalar(ElemSize::F32)),
             mem: MemSpace::Device,
         };
-        assert_eq!(ty.pprint_default(), "device float*");
+        assert_eq!(ty.pprint_default(), "device float *");
     }
 
     #[test]
@@ -593,7 +635,7 @@ mod test {
 
     #[test]
     fn print_buffer_param() {
-        let p = Param {id: id("x"), ty: Type::Buffer, attr: Some(ParamAttribute::Buffer {idx: 0})};
+        let p = Param {id: id("x"), ty: Type::MTLBufferPtr, attr: Some(ParamAttribute::Buffer {idx: 0})};
         assert_eq!(p.pprint_default(), "metal_buffer* x [[buffer(0)]]");
     }
 

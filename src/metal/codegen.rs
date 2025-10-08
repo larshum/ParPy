@@ -54,25 +54,36 @@ fn from_gpu_ir_type(env: &CodegenEnv, ty: gpu_ast::Type, i: &Info) -> CompileRes
             }
         },
         gpu_ast::Type::Pointer {ty, mem} => {
-            let ty = match from_gpu_ir_type(env, *ty, i) {
+            match from_gpu_ir_type(env, *ty, i) {
                 Ok(Type::Pointer {..}) => {
                     parpy_type_error!(i, "Found nested pointer in generated code, \
                                             which is not supported in Metal.")
                 },
-                Ok(ty) => Ok(Box::new(ty)),
+                Ok(ty @ Type::Function {..}) => {
+                    Ok(Type::Pointer {ty: Box::new(ty), mem: MemSpace::Host})
+                },
+                Ok(ty) => {
+                    let mem = from_gpu_ir_mem(mem);
+                    // The only pointers used in host code (outside the device) are pointers to Metal
+                    // buffers containing GPU data.
+                    if env.on_device {
+                        Ok(Type::Pointer {ty: Box::new(ty), mem})
+                    } else {
+                        Ok(Type::MTLBufferPtr)
+                    }
+                },
                 Err(e) => Err(e)
-            }?;
-            let mem = from_gpu_ir_mem(mem);
-            // The only pointers used in host code (outside the device) are pointers to Metal
-            // buffers containing GPU data.
-            if env.on_device {
-                Ok(Type::Pointer {ty, mem})
-            } else {
-                Ok(Type::Buffer)
             }
         },
         gpu_ast::Type::Struct {id} => {
             parpy_internal_error!(i, "Found struct type {id} in the Metal backend.")
+        },
+        gpu_ast::Type::Function {result, args} => {
+            let result = Box::new(from_gpu_ir_type(&env, *result, &i)?);
+            let args = args.into_iter()
+                .map(|arg| from_gpu_ir_type(&env, arg, &i))
+                .collect::<CompileResult<Vec<Type>>>()?;
+            Ok(Type::Function {result, args})
         }
     }
 }
@@ -101,7 +112,7 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
         },
         gpu_ast::Expr::StructFieldAccess {i, ..} => {
             parpy_internal_error!(i, "Found struct field access in the Metal backend,\
-                                        where structs are not supported.")
+                                      where structs are not supported.")
         },
         gpu_ast::Expr::ArrayAccess {target, idx, i, ..} => {
             let target = Box::new(from_gpu_ir_expr(env, *target)?);
@@ -118,13 +129,16 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
                 .collect::<CompileResult<Vec<Expr>>>()?;
             Ok(Expr::Call {id, args, ty, i})
         },
+        gpu_ast::Expr::PyCallback {i, ..} => {
+            parpy_internal_error!(i, "Found Python callback node in Metal codegen.")
+        },
         gpu_ast::Expr::Convert {e, ..} => {
             let e = Box::new(from_gpu_ir_expr(env, *e)?);
             Ok(Expr::Convert {e, ty})
         },
         gpu_ast::Expr::Struct {id, i, ..} => {
             parpy_internal_error!(i, "Found struct {id} in the Metal backend,\
-                                        where structs are not supported.")
+                                      where structs are not supported.")
         },
         gpu_ast::Expr::ThreadIdx {dim, i, ..} => Ok(Expr::ThreadIdx {dim, ty, i}),
         gpu_ast::Expr::BlockIdx {dim, i, ..} => Ok(Expr::BlockIdx {dim, ty, i}),
@@ -301,7 +315,7 @@ fn from_gpu_ir_attr(
 
 fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc> {
     match top {
-        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, target, header} => {
+        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, target, header, i: _} => {
             let env = CodegenEnv::new(&target);
             let ret_ty = from_gpu_ir_type(&env, ret_ty, &Info::default())?;
             let params = from_gpu_ir_params(&env, params, false)?;
@@ -315,7 +329,7 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             dst.push(Top::ExtDecl {ret_ty, id, ext_id, params});
             Ok(acc)
         },
-        gpu_ast::Top::KernelFunDef {attrs, id, params, body} => {
+        gpu_ast::Top::KernelFunDef {attrs, id, params, body, i: _} => {
             let env = CodegenEnv::new(&gpu_ast::Target::Device);
             let attrs = attrs.into_iter()
                 .map(from_gpu_ir_attr)
@@ -327,7 +341,7 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             });
             Ok(acc)
         },
-        gpu_ast::Top::FunDef {ret_ty, id, params, body, target} => {
+        gpu_ast::Top::FunDef {ret_ty, id, params, body, target, i: _} => {
             let env = CodegenEnv::new(&target);
             let ret_ty = from_gpu_ir_type(&env, ret_ty, &Info::default())?;
             let params = from_gpu_ir_params(&env, params, false)?;
@@ -347,10 +361,10 @@ fn from_gpu_ir_top(mut acc: TopsAcc, top: gpu_ast::Top) -> CompileResult<TopsAcc
             };
             Ok(acc)
         },
-        gpu_ast::Top::StructDef {id, ..} => {
-            parpy_internal_error!(Info::default(), "Found struct definition {id} \
-                                                      in the Metal backend, where \
-                                                      structs are not supported.")
+        gpu_ast::Top::StructDef {id, i, ..} => {
+            parpy_internal_error!(i, "Found struct definition {id} in the \
+                                      Metal codegen, which does not support \
+                                      struct types.")
         }
     }
 }
@@ -435,12 +449,16 @@ fn add_grid_index_arguments_to_kernels(mut tops: TopsAcc) -> TopsAcc {
 
 fn add_top_kernel_def(mut acc: Vec<Top>, t: &Top, lib_id: &Name) -> Vec<Top> {
     if let Top::FunDef {is_kernel: true, id, ..} = t {
+        let ty = Type::Pointer {
+            ty: Box::new(Type::MTLFunction),
+            mem: MemSpace::Host
+        };
         let get_fun_expr = Expr::GetFun {
-            lib: lib_id.clone(), fun_id: id.clone(), ty: Type::Function,
+            lib: lib_id.clone(), fun_id: id.clone(), ty: ty.clone(),
             i: Info::default()
         };
         acc.push(Top::VarDef {
-            ty: Type::Function, id: id.clone(), init: Some(get_fun_expr)
+            ty, id: id.clone(), init: Some(get_fun_expr)
         });
     }
     acc
@@ -451,9 +469,13 @@ fn add_top_kernel_defs(acc: Vec<Top>, tops: &Vec<Top>, lib_id: &Name) -> Vec<Top
 }
 
 fn generate_kernel_library_top(lib_id: Name, tops: Vec<Top>) -> Top {
+    let ty = Type::Pointer {
+        ty: Box::new(Type::MTLLibrary),
+        mem: MemSpace::Host
+    };
     Top::VarDef {
-        ty: Type::Library, id: lib_id,
-        init: Some(Expr::LoadLibrary {tops, ty: Type::Library, i: Info::default()})
+        ty: ty.clone(), id: lib_id,
+        init: Some(Expr::LoadLibrary {tops, ty, i: Info::default()})
     }
 }
 
@@ -521,7 +543,7 @@ mod test {
     fn from_1d_pointer_host() {
         let ty = gpu::pointer(gpu::scalar(ElemSize::F32), gpu_ast::MemSpace::Device);
         let env = mk_host_env();
-        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::Buffer);
+        assert_eq!(from_gpu_ir_type(&env, ty, &i()).unwrap(), Type::MTLBufferPtr);
     }
 
     #[test]
@@ -548,7 +570,7 @@ mod test {
         );
         let env = mk_host_env();
         let expected = Expr::HostArrayAccess {
-            target: Box::new(var("x", Type::Buffer)),
+            target: Box::new(var("x", Type::MTLBufferPtr)),
             idx: Box::new(int(0, ElemSize::I32)),
             ty: scalar(ElemSize::F32),
             i: i()
@@ -605,7 +627,7 @@ mod test {
         let ty = gpu::pointer(gpu::scalar(ElemSize::I32), gpu_ast::MemSpace::Device);
         let p = gpu_ast::Param {id: id("x"), ty, i: i()};
         let expected = Param {
-            id: id("x"), ty: Type::Buffer,
+            id: id("x"), ty: Type::MTLBufferPtr,
             attr: Some(ParamAttribute::Buffer {idx: 1})
         };
         assert_eq!(from_gpu_ir_param(&env, p, Some(1)), Ok(expected));

@@ -10,31 +10,67 @@ use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::pprint::*;
 use crate::utils::reduce;
-use crate::utils::smap::*;
+use crate::utils::smap::{SFlatten, SFold, SMapAccum};
+use crate::utils::substitute::SubVars;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-fn insert_synchronization_points_stmt(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
-    match s {
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
-        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
-        Stmt::Alloc {..} | Stmt::Free {..} => {
-            s.sflatten(acc, insert_synchronization_points_stmt)
+fn collect_host_functions(mut acc: BTreeSet<Name>, t: &Top) -> BTreeSet<Name> {
+    match t {
+        Top::ExtDecl {id, target: Target::Host, ..} => {
+            acc.insert(id.clone());
+            acc
         },
+        _ => acc
+    }
+}
+
+fn insert_synchronization_points_stmt(
+    mut acc: Vec<Stmt>,
+    s: Stmt,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    match s {
         Stmt::For {var, lo, hi, step, body, par, i} => {
             let is_par = par.is_parallel();
-            let body = insert_synchronization_points(body);
+            let body = insert_synchronization_points(body, &host_functions);
             acc.push(Stmt::For {var, lo, hi, step, body, par, i: i.clone()});
             if is_par {
                 acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
             }
             acc
         },
+        Stmt::Expr {
+            e: Expr::Call {id, args, par, ty, i: ei}, i
+        } if host_functions.contains(&id) => {
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i: i.clone()});
+            acc.push(Stmt::Expr {e: Expr::Call {id, args, par, ty, i: ei}, i: i.clone()});
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
+            acc
+        },
+        Stmt::Expr {e: Expr::PyCallback {id, args, ty, i: ei}, i} => {
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i: i.clone()});
+            acc.push(Stmt::Expr {e: Expr::PyCallback {id, args, ty, i: ei}, i: i.clone()});
+            acc.push(Stmt::SyncPoint {kind: SyncPointKind::InterBlock, i});
+            acc
+        },
+        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::SyncPoint {..} |
+        Stmt::If {..} | Stmt::While {..} | Stmt::Expr {..} | Stmt::Return {..} |
+        Stmt::Alloc {..} | Stmt::Free {..} => {
+            s.sflatten(acc, |acc, s| {
+                insert_synchronization_points_stmt(acc, s, &host_functions)
+            })
+        },
     }
 }
 
-fn insert_synchronization_points(stmts: Vec<Stmt>) -> Vec<Stmt> {
-    stmts.sflatten(vec![], insert_synchronization_points_stmt)
+fn insert_synchronization_points(
+    stmts: Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    stmts.sflatten(vec![], |acc, s| {
+        insert_synchronization_points_stmt(acc, s, &host_functions)
+    })
 }
 
 fn determine_cuda_cluster_size(opts: &option::CompileOptions) -> Option<i64> {
@@ -742,10 +778,9 @@ fn eliminate_unnecessary_synchronization_points_stmts(
             stmts.pop();
         }
     }
-    stmts.into_iter()
-        .fold(vec![], |acc, s| {
-            eliminate_unnecessary_synchronization_points_stmt(env.clone(), acc, s)
-        })
+    stmts.sflatten(vec![], |acc, s| {
+        eliminate_unnecessary_synchronization_points_stmt(env.clone(), acc, s)
+    })
 }
 
 fn eliminate_unnecessary_synchronization_points(body: Vec<Stmt>) -> Vec<Stmt> {
@@ -753,18 +788,21 @@ fn eliminate_unnecessary_synchronization_points(body: Vec<Stmt>) -> Vec<Stmt> {
     eliminate_unnecessary_synchronization_points_stmts(env, body)
 }
 
-fn sub_var_expr(from_id: &Name, to_id: &Name, e: Expr) -> Expr {
-    match e {
-        Expr::Var {id, ty, i} if id == *from_id => {
-            Expr::Var {id: to_id.clone(), ty, i}
+fn remove_empty_loop_nests_stmt(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
+    match s {
+        Stmt::For {var, lo, hi, step, body, par, i} => {
+            let body = remove_empty_loop_nests(body);
+            if !body.is_empty() {
+                acc.push(Stmt::For {var, lo, hi, step, body, par, i});
+            }
+            acc
         },
-        _ => e.smap(|e| sub_var_expr(from_id, to_id, e))
+        _ => s.sflatten(acc, remove_empty_loop_nests_stmt)
     }
 }
 
-fn sub_var_stmt(from_id: &Name, to_id: &Name, s: Stmt) -> Stmt {
-    s.smap(|s| sub_var_stmt(from_id, to_id, s))
-        .smap(|e| sub_var_expr(from_id, to_id, e))
+fn remove_empty_loop_nests(body: Vec<Stmt>) -> Vec<Stmt> {
+    body.sflatten(vec![], remove_empty_loop_nests_stmt)
 }
 
 fn resymbolize_duplicated_loops_stmt(
@@ -775,7 +813,10 @@ fn resymbolize_duplicated_loops_stmt(
         Stmt::For {var, lo, hi, step, body, par, i} => {
             let (var, body) = if vars.contains(&var) {
                 let new_id = var.clone().with_new_sym();
-                let body = body.smap(|s| sub_var_stmt(&var, &new_id, s));
+                let sub_env = vec![(var.clone(), new_id.clone())]
+                    .into_iter()
+                    .collect::<BTreeMap<Name, Name>>();
+                let body = body.smap(|s| s.sub_vars(&sub_env));
                 (new_id, body)
             } else {
                 vars.insert(var.clone());
@@ -1059,6 +1100,48 @@ fn allocate_temporary_data(
         .collect::<Vec<Stmt>>())
 }
 
+fn innermost_body_contains_host_call(
+    body: &Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> bool {
+    match &body[..] {
+        [Stmt::For {body, ..}] => {
+            innermost_body_contains_host_call(body, &host_functions)
+        }
+        [Stmt::Expr {e: Expr::Call {id, ..}, ..}] => host_functions.contains(id),
+        [Stmt::Expr {e: Expr::PyCallback {..}, ..}] => true,
+        _ => false,
+    }
+}
+
+fn remove_parallelism_of_host_loop_nests_stmt(
+    s: Stmt,
+    host_functions: &BTreeSet<Name>
+) -> Stmt {
+    match s {
+        Stmt::For {var, lo, hi, step, body, par, i} if par.is_parallel() => {
+            let par = if innermost_body_contains_host_call(&body, &host_functions) {
+                LoopPar::default()
+            } else {
+                par
+            };
+            let body = remove_parallelism_of_host_loop_nests(body, &host_functions);
+            Stmt::For {var, lo, hi, step, body, par, i}
+        },
+        _ => s.smap(|s| remove_parallelism_of_host_loop_nests_stmt(s, &host_functions))
+    }
+}
+
+/// Removes the parallelism of loop nests whose innermost workload consists of a statement that
+/// should run on the host. This can either be an external function that is declared to run on the
+/// host, or a callback function (which run in Python code on the host).
+fn remove_parallelism_of_host_loop_nests(
+    body: Vec<Stmt>,
+    host_functions: &BTreeSet<Name>
+) -> Vec<Stmt> {
+    body.smap(|s| remove_parallelism_of_host_loop_nests_stmt(s, &host_functions))
+}
+
 /// Restructure the code such that inter-block synchronizations are eliminated from the code. In
 /// particular, we identify the synchronization points within parallel code and classify them based
 /// on whether they require inter-block synchronization. Parallel reductions requiring inter-block
@@ -1082,9 +1165,11 @@ pub fn restructure_inter_block_synchronization(
     // The others are assumed to contain no parallelism.
     let FunDef {id, params, body, res_ty, i} = ast.main;
 
+    let host_functions = ast.tops.sfold(BTreeSet::new(), collect_host_functions);
+
     // Insert a synchronization point at the end of each parallel for-loop, and determine for each
     // of them whether they require inter-block synchronization.
-    let body = insert_synchronization_points(body);
+    let body = insert_synchronization_points(body, &host_functions);
     let par = par_tree::build_tree(&body);
     let body = classify_synchronization_points(&par, opts, body);
 
@@ -1108,6 +1193,9 @@ pub fn restructure_inter_block_synchronization(
     // parallel for-loop.
     let body = eliminate_unnecessary_synchronization_points(body);
 
+    // Removes any empty loop nests produced as a result of the inter-block transformation.
+    let body = remove_empty_loop_nests(body);
+
     // After hoisting, the code may be restructured such that the definition and the use(s) of a
     // local variable end up in separate parallel kernels. First, we promote assignments to
     // definitions, to properly handle repeated assignments to a local variable ending up in
@@ -1118,6 +1206,10 @@ pub fn restructure_inter_block_synchronization(
     // After the above transformations, we may end up with repeated use of a parallel for-loop. To
     // make sure later transformations work as expected, we need to re-symbolize loop variables.
     let body = resymbolize_duplicated_loops(body);
+
+    // Removes the parallelism of loop nests that contain calls to host code. This includes a call
+    // to a host external or a callback function.
+    let body = remove_parallelism_of_host_loop_nests(body, &host_functions);
 
     Ok(Ast {main: FunDef {id, params, body, res_ty, i}, ..ast})
 }
@@ -1293,7 +1385,7 @@ mod test {
     }
 
     fn assert_sync(body: Vec<Stmt>, expected: Vec<Stmt>) {
-        let body = insert_synchronization_points(body);
+        let body = insert_synchronization_points(body, &BTreeSet::new());
         print_stmts(&body, &expected);
         assert_eq!(body, expected);
     }
@@ -1712,5 +1804,37 @@ mod test {
             for_("x", 10, vec![assign(uvar("i"), int(9, None))])
         ];
         assert_hoist(body, expected)
+    }
+
+    #[test]
+    fn remove_loop_with_empty_body() {
+        let body = vec![
+            for_("x", 10, vec![])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), vec![]);
+    }
+
+    #[test]
+    fn remove_nested_empty_loop() {
+        let body = vec![
+            for_("x", 10, vec![for_("y", 10, vec![])])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), vec![]);
+    }
+
+    #[test]
+    fn remove_inner_nested_empty_loop() {
+        let body = vec![
+            for_("x", 10, vec![for_("y", 10, vec![
+                assign(uvar("a"), int(0, None))
+            ])]),
+            for_("z", 10, vec![for_("w", 10, vec![])])
+        ];
+        let expected = vec![
+            for_("x", 10, vec![for_("y", 10, vec![
+                assign(uvar("a"), int(0, None))
+            ])])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), expected);
     }
 }

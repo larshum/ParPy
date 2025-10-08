@@ -16,12 +16,14 @@ struct metal_buffer {
 // running GPU code, and operating on buffers.
 extern "C" void parpy_init(int64_t);
 extern "C" int32_t parpy_sync();
-extern "C" metal_buffer *parpy_alloc_buffer(int64_t);
+extern "C" MTL::Buffer *parpy_alloc_buffer(int64_t);
 extern "C" void *parpy_ptr_buffer(metal_buffer*);
-extern "C" void parpy_buffer_set_offset(metal_buffer*, int64_t);
+extern "C" metal_buffer *parpy_buffer_wrap_with_offset(MTL::Buffer*, int64_t);
+extern "C" int32_t parpy_buffer_wrap_free(metal_buffer*);
 extern "C" int32_t parpy_memcpy(void*, void*, int64_t, int64_t);
+extern "C" int32_t parpy_memcpy_buffer(void*, void*, int64_t, int64_t);
 extern "C" int32_t parpy_memset(void*, int64_t, int8_t);
-extern "C" int32_t parpy_free_buffer(metal_buffer*);
+extern "C" int32_t parpy_free_buffer(MTL::Buffer*);
 extern "C" const char *parpy_get_error_message();
 
 // The below functions are to be used in the generated kernel code from C++. We

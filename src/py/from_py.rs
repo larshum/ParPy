@@ -836,6 +836,29 @@ fn convert_returns<'py>(
                                            on external function"))
 }
 
+pub fn convert_callback<'py>(
+    ast: Bound<'py, PyAny>,
+    info: (String, usize, usize),
+    vars: (Bound<'py, PyDict>, Bound<'py, PyDict>)
+) -> PyResult<Top> {
+    let (filepath, line_ofs, col_ofs) = info;
+    let (globals, locals) = vars;
+    let env = ConvertEnv {
+        ast: ast.py().import("ast")?,
+        globals,
+        locals,
+        tops: &BTreeMap::new(),
+        filepath: &filepath,
+        line_ofs,
+        col_ofs
+    };
+    let body = ast.getattr("body")?.get_item(0)?;
+    let id = Name::new(body.getattr("name")?.extract::<String>()?);
+    let params = convert_params(&body, &env)?;
+    let i = extract_info(&body, &env);
+    Ok(Top::CallbackDecl {id, params, i})
+}
+
 pub fn convert_external<'py>(
     ast: Bound<'py, PyAny>,
     info: (String, usize, usize),

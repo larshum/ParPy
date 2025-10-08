@@ -5,6 +5,7 @@ from .parpy import par, CompileBackend, CompileOptions, ElemSize, Target
 _ir_asts = {}
 _ext_decls = {}
 _ext_tops = {}
+_callbacks = {}
 _fun_cache = {}
 
 def _qualified_name(fn):
@@ -20,7 +21,7 @@ def _get_tops(backend):
             ext_tops = {}
     else:
         ext_tops = _ext_tops
-    return {**ast_tops, **ext_tops}
+    return {**ast_tops, **ext_tops, **_callbacks}
 
 def _get_source_code(fn):
     import inspect
@@ -37,19 +38,23 @@ def _get_source_code(fn):
         src = inspect.cleandoc(src)
     return src, fst_line-1, col_ofs
 
-def _convert_python_function_to_ir(fn, vars):
+def _parse_function(fn):
     import ast as python_ast
     import inspect
     import itertools
     filepath = inspect.getfile(fn)
     src, line_ofs, col_ofs = _get_source_code(fn)
     ast = python_ast.parse(src)
+    info = (filepath, line_ofs, col_ofs)
+    return ast, info
+
+def _convert_python_function_to_ir(fn, vars):
+    ast, info = _parse_function(fn)
 
     # Convert the Python representation of the AST to a Python-like
     # representation in the compiler. As part of this step, we inline any
     # references to previously parsed functions.
     top_map = _get_tops(None)
-    info = (filepath, line_ofs, col_ofs)
     return parpy.python_to_ir(ast, info, top_map, vars)
 
 def _check_kwarg(kwargs, key, expected_ty, fun_name):
@@ -73,13 +78,12 @@ def _validate_external_type(target, backend, par):
     else:
         raise RuntimeError(f"Unsupported external backend: {backend}")
 
+def _declare_callback(fn, vars):
+    ast, info = _parse_function(fn)
+    return parpy.declare_callback(ast, info, vars)
+
 def _declare_external(fn, ext_name, target, header, parallelize, vars):
-    import ast as python_ast
-    import inspect
-    filepath = inspect.getfile(fn)
-    src, line_ofs, col_ofs = _get_source_code(fn)
-    ast = python_ast.parse(src)
-    info = (filepath, line_ofs, col_ofs)
+    ast, info = _parse_function(fn)
     return parpy.declare_external(ast, info, ext_name, target, header, parallelize, vars)
 
 def _check_kwargs(kwargs, fun_name):
@@ -94,7 +98,7 @@ def _check_kwargs(kwargs, fun_name):
 
     return opts
 
-def _compile_function(ir_ast, args, opts):
+def _compile_function(ir_ast, args, vars, opts):
     from .compile import build_shared_library, get_wrapper
     from .key import _generate_fast_cache_key, _generate_function_key
 
@@ -112,7 +116,7 @@ def _compile_function(ir_ast, args, opts):
     # Generate the code based on the provided IR AST, arguments and compilation
     # options.
     top_map = _get_tops(opts.backend)
-    code, unsymb_code = parpy.compile_ir(ir_ast, args, opts, top_map)
+    argtypes, callbacks, code, unsymb_code = parpy.compile_ir(ir_ast, args, opts, top_map)
 
     # If the shared library corresponding to the generated code does not exist,
     # we run the underlying compiler to produce a shared library.
@@ -121,15 +125,9 @@ def _compile_function(ir_ast, args, opts):
 
     # Return a wrapper function which ensures the arguments are correctly
     # passed to the exposed shared library function.
-    wrap_fn = get_wrapper(name, cache_key, opts)
+    wrap_fn = get_wrapper(name, cache_key, argtypes, vars, callbacks)
     _fun_cache[fast_cache_key] = wrap_fn
     return wrap_fn
-
-def _run_callbacks(callbacks, opts):
-    if len(callbacks) > 0:
-        sync(opts.backend)
-        for cb in callbacks:
-            cb()
 
 def threads(n):
     """
@@ -159,14 +157,14 @@ def compile_string(fun_name, code, opts=CompileOptions()):
     Compiles the code provided as a string and returns a wrapper to the
     entry point function with the specified name.
     """
-    from .compile import build_shared_library, get_wrapper
+    from .compile import build_shared_library, get_string_wrapper
     from .key import _generate_function_key
     from .validate import check_arguments
     import functools
     opts = backend._resolve_backend(opts, True)
     cache_key = "string_" + _generate_function_key(code, opts)
     build_shared_library(cache_key, code, opts)
-    fn = get_wrapper(fun_name, cache_key, opts)
+    fn = get_string_wrapper(fun_name, cache_key, opts)
     @functools.wraps(fn)
     def inner(*args):
         args = check_arguments(args, opts, True)
@@ -191,8 +189,16 @@ def print_compiled(fun, args, opts=CompileOptions()):
         ir_ast = _convert_python_function_to_ir(fun, vars)
     args = check_arguments(args, opts, False)
     top_map = _get_tops(opts.backend)
-    code, _ = parpy.compile_ir(ir_ast, args, opts, top_map)
+    _, _, code, _ = parpy.compile_ir(ir_ast, args, opts, top_map)
     return code
+
+def callback(fn):
+    import inspect
+    globs = inspect.currentframe().f_back.f_globals
+    locs = inspect.currentframe().f_back.f_locals
+    vars = (globs, locs)
+    _callbacks[_qualified_name(fn)] = _declare_callback(fn, vars)
+    return fn
 
 def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()):
     """
@@ -205,17 +211,13 @@ def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()
     vars = (globs, locs)
     def external_wrap(fn):
         import functools
-
-        @functools.wraps(fn)
-        def inner(*args):
-            return fn(*args)
         _validate_external_type(target, backend, parallelize)
         ext_decl = _declare_external(fn, ext_name, target, header, parallelize, vars)
         if not backend in _ext_decls:
             _ext_decls[backend] = {}
         _ext_decls[backend][_qualified_name(fn)] = ext_decl
         _ext_tops[_qualified_name(fn)] = ext_decl
-        return inner
+        return fn
     return external_wrap
 
 def jit(fun):
@@ -237,6 +239,6 @@ def jit(fun):
     def inner(*args, **kwargs):
         opts = backend._resolve_backend(_check_kwargs(kwargs, fun.__name__), True)
         args = check_arguments(args, opts, True)
-        _compile_function(ir_ast, args, opts)(*args)
+        _compile_function(ir_ast, args, vars, opts)(*args)
     _ir_asts[inner] = ir_ast
     return inner

@@ -132,27 +132,44 @@ def from_array(t, backend):
     else:
         raise ValueError(f"Cannot convert to buffer of unknown backend {backend}")
 
+def from_raw(ptr, shape, dtype, backend):
+    if backend is None:
+        return Buffer.from_raw(ptr, shape, dtype)
+    elif backend == CompileBackend.Cuda:
+        return CudaBuffer.from_raw(ptr, shape, dtype)
+    elif backend == CompileBackend.Metal:
+        return MetalBuffer.from_raw(ptr, shape, dtype)
+    else:
+        raise ValueError(f"Cannot convert raw data to buffer of unknown backend {backend}")
+
 class BaseBuffer:
-    def __init__(self, buf, nbytes, src):
+    def __init__(self, buf, nbytes, src, is_raw):
         if type(self) is BaseBuffer:
             raise RuntimeError(f"Cannot construct instance of BaseBuffer class")
         self.buf = buf
         self.nbytes = nbytes
         self.src = src
+        self.is_raw = is_raw
 
     def __del__(self):
-        if self.src is not None:
-            src_ptr, _, _ = _extract_array_interface(self.src)
-        else:
-            src_ptr = None
-        self._deconstruct(src_ptr)
+        # We skip running the deconstructor for a buffer constructed from raw
+        # data, as this will be handled in the original buffer.
+        if not self.is_raw:
+            if self.src is not None:
+                src_ptr, _, _ = _extract_array_interface(self.src)
+            else:
+                src_ptr = None
+            self._deconstruct(src_ptr)
 
     def _deconstruct(self, src_ptr):
         pass
 
+    def sync(self):
+        pass
+
 class CudaBaseBuffer(BaseBuffer):
-    def __init__(self, buf, nbytes, src=None):
-        super().__init__(buf, nbytes, src)
+    def __init__(self, buf, nbytes, src=None, is_raw=False):
+        super().__init__(buf, nbytes, src, is_raw)
 
     def _deconstruct(self, src_ptr):
         if src_ptr is not None:
@@ -195,20 +212,20 @@ class CudaBaseBuffer(BaseBuffer):
                 self.__cuda_array_interface__ = _to_array_interface(ptr, shape, dtype)
         buf = torch.as_tensor(dummy(), device='cuda')
         nbytes = _size(shape, dtype)
-        return CudaBaseBuffer(buf, nbytes)
+        return CudaBaseBuffer(buf, nbytes, is_raw=True)
 
     def copy(self):
         return CudaBaseBuffer(self.buf.detach().clone(), self.nbytes)
 
 class MetalBaseBuffer(BaseBuffer):
-    def __init__(self, buf, nbytes, src=None):
-        super().__init__(buf, nbytes, src)
+    def __init__(self, buf, nbytes, src=None, is_raw=False):
+        super().__init__(buf, nbytes, src, is_raw)
 
     def _deconstruct(self, src_ptr):
         self.sync()
         lib = self._get_runtime_lib()
         if src_ptr is not None:
-            _check_errors(lib, lib.parpy_memcpy(src_ptr, self.buf, self.nbytes, 2))
+            _check_errors(lib, lib.parpy_memcpy_buffer(src_ptr, self.buf, self.nbytes, 2))
         _check_errors(lib, lib.parpy_free_buffer(self.buf))
 
     def _get_runtime_lib(self):
@@ -226,18 +243,17 @@ class MetalBaseBuffer(BaseBuffer):
         lib = _compile_runtime_lib(CompileBackend.Metal)
         nbytes = _size(shape, dtype)
         buf = _check_not_nullptr(lib, lib.parpy_alloc_buffer(nbytes))
-        _check_errors(lib, lib.parpy_memcpy(buf, data_ptr, nbytes, 1))
+        _check_errors(lib, lib.parpy_memcpy_buffer(buf, data_ptr, nbytes, 1))
         return MetalBaseBuffer(buf, nbytes, src=t)
 
     def from_raw(ptr, shape, dtype):
-        # This assumes the provided raw pointer points to a MTL::Buffer
         nbytes = _size(shape, dtype)
-        return MetalBaseBuffer(ptr, nbytes)
+        return MetalBaseBuffer(ptr, nbytes, is_raw=True)
 
 class Buffer:
     def __init__(self, buf, shape, dtype, buf_offset):
         self.buf = buf
-        self.shape = shape
+        self.shape = tuple(shape)
         self.dtype = _resolve_dtype(dtype)
         self.buf_offset = buf_offset
 
@@ -274,7 +290,7 @@ class Buffer:
         ofs = self.buf_offset
         for i, (j, k) in enumerate(zip(idx, self.shape)):
             if j < k:
-                ofs += j * math.prod(self.shape[i+1:])
+                ofs += j * math.prod(self.shape[i+1:]) * self.dtype.size()
             else:
                 raise IndexError(f"Index {j} out of bounds for dimension {k} of buffer")
         new_shape = self.shape[len(idx):]
@@ -289,7 +305,11 @@ class Buffer:
         nelems = self.buf.nbytes // self.dtype.size()
         a = buf.reshape(nelems)
         size = math.prod(self.shape)
-        return a[self.buf_offset:self.buf_offset+size].reshape(self.shape)
+        elem_ofs = self.buf_offset // self.dtype.size()
+        return a[elem_ofs:elem_ofs+size].reshape(self.shape)
+
+    def _get_runtime_lib(self):
+        return self.buf._get_runtime_lib()
 
     def from_array(t):
         try:
@@ -302,6 +322,9 @@ class Buffer:
 
     def size(self):
         return _size(self.shape, self.dtype)
+
+    def sync(self):
+        self.buf.sync()
 
     def numpy(self):
         import numpy as np
@@ -337,7 +360,10 @@ class CudaBuffer(Buffer):
 
     def _get_ptr(self):
         ptr, _, _, = _check_array_interface(self.__cuda_array_interface__)
-        return ptr + self.buf_offset * self.dtype.size()
+        return ptr + self.buf_offset
+
+    def backend(self):
+        return CompileBackend.Cuda
 
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t, allow_cuda=True)
@@ -347,6 +373,13 @@ class CudaBuffer(Buffer):
     def from_raw(ptr, shape, dtype):
         buf = CudaBaseBuffer.from_raw(ptr, shape, dtype)
         return CudaBuffer(buf, shape, dtype)
+
+    def copy_from(self, t):
+        _, shape, dtype = _extract_array_interface(t, allow_cuda=True)
+        if self.shape == shape and self.dtype == dtype:
+            self.torch()[:] = t
+        else:
+            raise ValueError(f"Cannot copy data from array of shape {shape} and type {dtype} to CUDA buffer of shape {self.shape} and type {self.dtype}")
 
     def numpy(self):
         import numpy as np
@@ -369,47 +402,66 @@ class CudaBuffer(Buffer):
 class MetalBuffer(Buffer):
     def __init__(self, buf, shape, dtype, buf_offset=0):
         super().__init__(buf, shape, dtype, buf_offset)
-        lib = self.buf._get_runtime_lib()
-        ptr = lib.parpy_ptr_buffer(self.buf.buf)
-        self.__array_interface__ = _to_array_interface(ptr, self.shape, self.dtype)
+        lib = self._get_runtime_lib()
+        self.buf_wrap = lib.parpy_buffer_wrap_with_offset(self.buf.buf, self.buf_offset)
+
+    def __del__(self):
+        lib = self._get_runtime_lib()
+        _check_errors(lib, lib.parpy_buffer_wrap_free(self.buf_wrap))
 
     def _get_ptr(self):
-        lib = self.buf._get_runtime_lib()
-        lib.parpy_buffer_set_offset(self.buf.buf, self.buf_offset * self.dtype.size())
-        return self.buf.buf
+        return self.buf_wrap
 
-    def _copy_to_numpy(self):
-        import numpy as np
-        nelems = self.buf.nbytes // self.dtype.size()
-        a = np.ndarray((nelems,), dtype=self.dtype.to_numpy())
-        ptr, _, _ = _check_array_interface(a.__array_interface__)
-        self.buf.sync()
-        lib = self.buf._get_runtime_lib()
-        _check_errors(lib, lib.parpy_memcpy(ptr, self.buf.buf, self.buf.nbytes, 2))
-        return a
+    def backend(self):
+        return CompileBackend.Metal
 
     def from_array(t):
         _, shape, dtype = _extract_array_interface(t)
         buf = MetalBaseBuffer.from_array(t)
         return MetalBuffer(buf, shape, dtype)
 
-    def from_raw(ptr, shape, dtype):
-        buf = MetalBaseBuffer.from_raw(ptr, shape, dtype)
-        return MetalBuffer(buf, shape, dtype)
+    def from_raw(wrap_ptr, shape, dtype):
+        # We expect to receive a pointer of the same format as is returned by
+        # '_get_ptr'. Assuming this is a valid pointer, we can destruct it by
+        # interpreting it as the MetalBuffer type defined in the native runtime
+        # library.
+        import ctypes
+        class MetalBufferStruct(ctypes.Structure):
+            _fields_ = [("buf", ctypes.c_void_p), ("offset", ctypes.c_int64)]
+        mb = MetalBufferStruct.from_address(wrap_ptr)
+        buf = MetalBaseBuffer.from_raw(mb.buf, shape, dtype)
+        return MetalBuffer(buf, shape, dtype, mb.offset)
 
     def numpy(self):
-        return self._get_indexed(self._copy_to_numpy())
+        import numpy as np
+        nelems = self.size() // self.dtype.size()
+        a = np.ndarray((nelems,), dtype=self.dtype.to_numpy())
+        ptr, _, _ = _check_array_interface(a.__array_interface__)
+        self.sync()
+        lib = self._get_runtime_lib()
+        print(f"copying data to numpy array from {self.buf} {self.shape} {self.dtype} {self.buf_offset} {self.buf_wrap}")
+        _check_errors(lib, lib.parpy_memcpy(ptr, self.buf_wrap, self.size(), 2))
+        return a.reshape(self.shape)
 
     def torch(self):
         import torch
-        return self._get_indexed(torch.as_tensor(self._copy_to_numpy()))
+        return torch.as_tensor(self.numpy())
 
     def copy(self):
         b = empty(self.shape, self.dtype, CompileBackend.Metal)
-        self.buf.sync()
-        lib = self.buf._get_runtime_lib()
-        _check_errors(lib, lib.parpy_memcpy(b.buf.buf, self.buf.buf, self.size(), 3))
+        self.sync()
+        lib = self._get_runtime_lib()
+        _check_errors(lib, lib.parpy_memcpy(b.buf_wrap, self.buf_wrap, self.size(), 3))
         return b
+
+    def copy_from(self, t):
+        ptr, shape, dtype = _extract_array_interface(t)
+        if self.shape == shape and self.dtype == dtype:
+            self.sync()
+            lib = self._get_runtime_lib()
+            _check_errors(lib, lib.parpy_memcpy(self.buf_wrap, ptr, self.size(), 1))
+        else:
+            raise ValueError(f"Cannot copy data from array of shape {shape} and type {dtype} to Metal buffer of shape {self.shape} and type {self.dtype}")
 
     def with_type(self, new_dtype):
         new_dtype = _resolve_dtype(new_dtype)
@@ -417,6 +469,14 @@ class MetalBuffer(Buffer):
             if self.dtype.size() == new_dtype.size():
                 return MetalBuffer(self.buf, self.shape, new_dtype, self.buf_offset)
             else:
-                import numpy as np
-                t = np.asarray(self).astype(dtype=new_dtype.to_numpy())
-                return MetalBuffer.from_array(t)
+                # NOTE(larshum, 2025-10-08): In case the new type has a
+                # distinct size, we convert data to NumPy and copy it to a
+                # freshly allocated ParPy buffer. Using this approach, we avoid
+                # an extra copy back to the NumPy array in the end (compared to
+                # if we had used 'from_array').
+                a = self.numpy().astype(dtype=new_dtype.to_numpy())
+                ptr, _, _ = _check_array_interface(a.__array_interface__)
+                b = empty(self.shape, new_dtype, CompileBackend.Metal)
+                lib = self._get_runtime_lib()
+                _check_errors(lib, lib.parpy_memcpy(b.buf_wrap, ptr, b.size(), 1))
+                return b

@@ -331,7 +331,7 @@ fn unify_parameter_type(
                         format!("  {id} = {sz}")
                     });
                 let vars = shapes.chain(types).join("\n");
-                format!("Where\n{vars}")
+                format!("\nWhere:\n{vars}")
             };
             py_type_error!(i, "Parameter {id} was annotated with type {ty} \
                                which is incompatible with argument type {arg_type}.\
@@ -865,10 +865,16 @@ impl TypeCheck for Expr {
                 let ty = Type::Tuple {elems: elem_types};
                 Ok((env, Expr::Tuple {elems, ty, i}))
             },
+            Expr::List {i, ..} => {
+                py_internal_error!(i, "Found list node in the type-checker")
+            },
             Expr::Call {id, args, ty: _, i} => {
                 let (env, args) = args.type_check(env)?;
                 let (env, new_id, ty, args) = type_check_call(env, &id, args, &i)?;
                 Ok((env, Expr::Call {id: new_id, args, ty, i}))
+            },
+            Expr::Callback {i, ..} => {
+                py_internal_error!(i, "Found callback node in the type-checker")
             },
             Expr::Convert {e, ty, i} => {
                 let (env, e) = e.type_check(env)?;
@@ -962,6 +968,7 @@ fn any_parameter_is_annotated(params: &Vec<Param>) -> bool {
 
 fn extract_annotated_params(t: &Top) -> Option<Vec<Param>> {
     let params = match t {
+        Top::CallbackDecl {params, ..} => params,
         Top::ExtDecl {params, ..} => params,
         Top::FunDef {v: FunDef {params, ..}} => params,
     };
@@ -1015,6 +1022,7 @@ fn type_check_call<'py>(
                 .collect::<Vec<Type>>();
             let (env, t) = type_check_top(env, t, arg_types)?;
             let (new_id, ret_ty) = match t {
+                Top::CallbackDecl {id, ..} => (id.clone(), Type::Void),
                 Top::ExtDecl {id, res_ty, ..} |
                 Top::FunDef {v: FunDef {id, res_ty, ..}} => {
                     (id.clone(), res_ty.clone())
@@ -1072,6 +1080,12 @@ fn type_check_top<'py>(
     arg_types: Vec<Type>
 ) -> TypeCheckResult<'py, Top> {
     match t {
+        Top::CallbackDecl {id, params, i} => {
+            let (_, params) = unify_parameter_types(params, arg_types, &id, &i)?;
+            let t = Top::CallbackDecl {id, params, i};
+            env.spec_list.push(t.clone());
+            Ok((env, t))
+        },
         Top::ExtDecl {id, ext_id, params, res_ty, target, header, par, i} => {
             let (_, params) = unify_parameter_types(params, arg_types, &id, &i)?;
             let t = Top::ExtDecl {id, ext_id, params, res_ty, target, header, par, i};

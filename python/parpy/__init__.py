@@ -7,7 +7,7 @@ from . import types
 
 from .parpy import par, CompileBackend, CompileOptions, ElemSize, Target
 from .buffer import sync
-from .main import threads, reduce, clear_cache, compile_string, print_compiled, external, jit
+from .main import threads, reduce, clear_cache, compile_string, print_compiled, callback, external, jit
 from .builtin import gpu, label
 
-__version__ = "0.2.2"
+__version__ = "0.3.0"

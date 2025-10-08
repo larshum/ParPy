@@ -1,3 +1,4 @@
+use crate::py::ast as py_ast;
 use crate::utils::ast::ExprType;
 use crate::utils::info::*;
 use crate::utils::name::Name;
@@ -28,6 +29,7 @@ pub enum Type {
     Scalar {sz: ElemSize},
     Pointer {ty: Box<Type>, mem: MemSpace},
     Struct {id: Name},
+    Function {result: Box<Type>, args: Vec<Type>},
 }
 
 impl Type {
@@ -55,6 +57,7 @@ pub enum Expr {
     StructFieldAccess {target: Box<Expr>, label: String, ty: Type, i: Info},
     ArrayAccess {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
     Call {id: Name, args: Vec<Expr>, ty: Type, i: Info},
+    PyCallback {id: Name, args: Vec<py_ast::Expr>, ty: Type, i: Info},
     Convert {e: Box<Expr>, ty: Type},
 
     // High-level representation of a struct literal value.
@@ -79,6 +82,7 @@ impl ExprType<Type> for Expr {
             Expr::StructFieldAccess {ty, ..} => ty,
             Expr::ArrayAccess {ty, ..} => ty,
             Expr::Call {ty, ..} => ty,
+            Expr::PyCallback {ty, ..} => ty,
             Expr::Convert {ty, ..} => ty,
             Expr::Struct {ty, ..} => ty,
             Expr::ThreadIdx {ty, ..} => ty,
@@ -89,8 +93,8 @@ impl ExprType<Type> for Expr {
     fn is_leaf_node(&self) -> bool {
         match self {
             Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} |
-            Expr::Float {..} | Expr::Call {..} | Expr::Struct {..} |
-            Expr::ThreadIdx {..} | Expr::BlockIdx {..} => true,
+            Expr::Float {..} | Expr::Call {..} | Expr::PyCallback {..} |
+            Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => true,
             _ => false
         }
     }
@@ -109,6 +113,7 @@ impl InfoNode for Expr {
             Expr::StructFieldAccess {i, ..} => i.clone(),
             Expr::ArrayAccess {i, ..} => i.clone(),
             Expr::Call {i, ..} => i.clone(),
+            Expr::PyCallback {i, ..} => i.clone(),
             Expr::Convert {e, ..} => e.get_info(),
             Expr::Struct {i, ..} => i.clone(),
             Expr::ThreadIdx {i, ..} => i.clone(),
@@ -141,6 +146,9 @@ impl PartialEq for Expr {
                 ltarget.eq(rtarget) && lidx.eq(ridx),
             ( Expr::Call {id: lid, args: largs, ..}
             , Expr::Call {id: rid, args: rargs, ..} ) =>
+                lid.eq(rid) && largs.eq(rargs),
+            ( Expr::PyCallback {id: lid, args: largs, ..}
+            , Expr::PyCallback {id: rid, args: rargs, ..} ) =>
                 lid.eq(rid) && largs.eq(rargs),
             (Expr::Convert {e: le, ..}, Expr::Convert {e: re, ..}) => le.eq(re),
             ( Expr::Struct {id: lid, fields: lfields, ..}
@@ -207,7 +215,9 @@ impl SMapAccum<Expr> for Expr {
                 Ok((acc, Expr::Struct {id, fields, ty, i}))
             },
             Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
-            Expr::ThreadIdx {..} | Expr::BlockIdx {..} => Ok((acc?, self)),
+            Expr::PyCallback {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
+                Ok((acc?, self))
+            }
         }
     }
 }
@@ -228,7 +238,8 @@ impl SFold<Expr> for Expr {
             Expr::Convert {e, ..} => f(acc?, e),
             Expr::Struct {fields, ..} => fields.sfold_result(acc, &f),
             Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} |
-            Expr::Float {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => acc,
+            Expr::Float {..} | Expr::PyCallback {..} | Expr::ThreadIdx {..} |
+            Expr::BlockIdx {..} => acc,
         }
     }
 }
@@ -593,11 +604,17 @@ pub enum KernelAttribute {
 pub enum Top {
     ExtDecl {
         ret_ty: Type, id: Name, ext_id: String, params: Vec<Param>, target: Target,
-        header: Option<String>
+        header: Option<String>, i: Info
     },
-    KernelFunDef {attrs: Vec<KernelAttribute>, id: Name, params: Vec<Param>, body: Vec<Stmt>},
-    FunDef {ret_ty: Type, id: Name, params: Vec<Param>, body: Vec<Stmt>, target: Target},
-    StructDef {id: Name, fields: Vec<Field>},
+    KernelFunDef {
+        attrs: Vec<KernelAttribute>, id: Name, params: Vec<Param>, body: Vec<Stmt>,
+        i: Info
+    },
+    FunDef {
+        ret_ty: Type, id: Name, params: Vec<Param>, body: Vec<Stmt>, target: Target,
+        i: Info
+    },
+    StructDef {id: Name, fields: Vec<Field>, i: Info},
 }
 
 impl SMapAccum<Stmt> for Top {
@@ -607,15 +624,17 @@ impl SMapAccum<Stmt> for Top {
         f: impl Fn(A, Stmt) -> Result<(A, Stmt), E>
     ) -> Result<(A, Self), E> {
         match self {
-            Top::KernelFunDef {attrs, id, params, body} => {
+            Top::KernelFunDef {attrs, id, params, body, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Top::KernelFunDef {attrs, id, params, body}))
+                Ok((acc, Top::KernelFunDef {attrs, id, params, body, i}))
             },
-            Top::FunDef {ret_ty, id, params, body, target} => {
+            Top::FunDef {ret_ty, id, params, body, target, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Top::FunDef {ret_ty, id, params, body, target}))
+                Ok((acc, Top::FunDef {ret_ty, id, params, body, target, i}))
             },
-            Top::ExtDecl {..} | Top::StructDef {..} => Ok((acc?, self))
+            Top::ExtDecl {..} | Top::StructDef {..} => {
+                Ok((acc?, self))
+            }
         }
     }
 }

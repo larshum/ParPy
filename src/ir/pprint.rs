@@ -67,6 +67,11 @@ impl PrettyPrint for Expr {
                 let (env, args) = pprint_iter(args.iter(), env, ", ");
                 (env, format!("{id}({args})"))
             },
+            Expr::PyCallback {id, args, ..} => {
+                let (env, id) = id.pprint(env);
+                let (env, args) = pprint_iter(args.iter(), env, ", ");
+                (env, format!("{id}({args})"))
+            },
             Expr::Convert {e, ty, ..} => {
                 let (env, e) = e.pprint(env);
                 let (env, ty) = ty.pprint(env);

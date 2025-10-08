@@ -6,7 +6,7 @@ use crate::utils::smap::*;
 fn validate_gpu_memory_access_expr(acc: (), e: &Expr) -> CompileResult<()> {
     match e {
         Expr::ArrayAccess {i, ..} => {
-            parpy_compile_error!(i, "Assignments are not allowed outside parallel code.")
+            parpy_compile_error!(i, "Data cannot be accessed outside parallel code.")
         },
         _ => e.sfold_result(Ok(acc), validate_gpu_memory_access_expr)
     }
@@ -33,7 +33,7 @@ pub fn validate_gpu_memory_access(ast: &Ast) -> CompileResult<()> {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::test::assert_error_matches;
+    use crate::test::*;
     use crate::gpu::ast_builder::*;
 
     fn assign_stmt() -> Stmt {
@@ -56,7 +56,7 @@ mod test {
     fn gpu_access_from_kernel_ok() {
         let ast = vec![Top::KernelFunDef {
             attrs: vec![], id: id("kernel"), params: vec![],
-            body: vec![assign_stmt()]
+            body: vec![assign_stmt()], i: i()
         }];
         assert!(validate_gpu_memory_access(&ast).is_ok());
     }
@@ -65,16 +65,16 @@ mod test {
     fn gpu_access_from_host_fails() {
         let ast = vec![Top::FunDef {
             ret_ty: Type::Void, id: id("f"), params: vec![],
-            body: vec![assign_stmt()], target: Target::Host
+            body: vec![assign_stmt()], target: Target::Host, i: i()
         }];
-        assert_error_matches(validate_gpu_memory_access(&ast), "not allowed outside parallel");
+        assert_error_matches(validate_gpu_memory_access(&ast), "cannot be accessed outside parallel");
     }
 
     #[test]
     fn gpu_access_from_device_fun_ok() {
         let ast = vec![Top::FunDef {
             ret_ty: Type::Void, id: id("f"), params: vec![],
-            body: vec![assign_stmt()], target: Target::Device
+            body: vec![assign_stmt()], target: Target::Device, i: i()
         }];
         assert!(validate_gpu_memory_access(&ast).is_ok());
     }

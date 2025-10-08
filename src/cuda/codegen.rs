@@ -18,6 +18,13 @@ fn from_gpu_ir_type(ty: gpu_ast::Type) -> Type {
             Type::Pointer {ty: Box::new(from_gpu_ir_type(*ty))}
         },
         gpu_ast::Type::Struct {id} => Type::Struct {id},
+        gpu_ast::Type::Function {result, args} => {
+            let result = Box::new(from_gpu_ir_type(*result));
+            let args = args.into_iter()
+                .map(from_gpu_ir_type)
+                .collect::<Vec<Type>>();
+            Type::Function {result, args}
+        }
     }
 }
 
@@ -100,6 +107,9 @@ fn from_gpu_ir_expr(e: gpu_ast::Expr) -> CompileResult<Expr> {
             } else {
                 Ok(Expr::Call {id, args, ty, i})
             }
+        },
+        gpu_ast::Expr::PyCallback {i, ..} => {
+            parpy_internal_error!(i, "Found Python callback node in CUDA codegen.")
         },
         gpu_ast::Expr::Convert {e, ..} => {
             let e = from_gpu_ir_expr(*e)?;
@@ -248,7 +258,7 @@ fn from_gpu_ir_top(
 ) -> CompileResult<(Vec<Top>, Vec<Top>)> {
     let (mut includes, mut tops) = acc?;
     match t {
-        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, header, target: _} => {
+        gpu_ast::Top::ExtDecl {ret_ty, id, ext_id, params, header, target: _, i: _} => {
             let ret_ty = from_gpu_ir_type(ret_ty);
             let params = from_gpu_ir_params(params);
             if let Some(h) = header {
@@ -256,7 +266,7 @@ fn from_gpu_ir_top(
             };
             tops.push(Top::ExtDecl {ret_ty, id, ext_id, params});
         },
-        gpu_ast::Top::KernelFunDef {attrs, id, params, body} => {
+        gpu_ast::Top::KernelFunDef {attrs, id, params, body, i: _} => {
             let attrs = attrs.into_iter()
                 .map(from_gpu_ir_attr)
                 .collect::<Vec<KernelAttribute>>();
@@ -269,7 +279,7 @@ fn from_gpu_ir_top(
                 attrs, id, params, body
             });
         },
-        gpu_ast::Top::FunDef {ret_ty, id, params, body, target} => {
+        gpu_ast::Top::FunDef {ret_ty, id, params, body, target, i: _} => {
             let ret_ty = from_gpu_ir_type(ret_ty);
             let params = from_gpu_ir_params(params);
             let body = from_gpu_ir_stmts(body)?;
@@ -282,7 +292,7 @@ fn from_gpu_ir_top(
                 id, params, body
             });
         },
-        gpu_ast::Top::StructDef {id, fields} => {
+        gpu_ast::Top::StructDef {id, fields, i: _} => {
             let fields = fields.into_iter()
                 .map(from_gpu_ir_field)
                 .collect::<Vec<Field>>();
@@ -296,6 +306,10 @@ fn type_contains_16_bit_floats(acc: bool, ty: &gpu_ast::Type) -> bool {
     match ty {
         gpu_ast::Type::Scalar {sz: ElemSize::F16} => true,
         gpu_ast::Type::Pointer {ty, ..} => type_contains_16_bit_floats(acc, ty),
+        gpu_ast::Type::Function {result, args} => {
+            let acc = type_contains_16_bit_floats(acc, result);
+            args.sfold(acc, type_contains_16_bit_floats)
+        },
         gpu_ast::Type::Void |
         gpu_ast::Type::Scalar {..} |
         gpu_ast::Type::Struct {..} => acc,
@@ -366,6 +380,7 @@ mod test {
     use crate::cuda::ast_builder::*;
     use crate::gpu::ast_builder as gpu;
     use crate::option::CompileOptions;
+    use crate::test::*;
 
     #[test]
     fn scalar_type_contains_16bit_float_fails() {
@@ -401,7 +416,7 @@ mod test {
         vec![
             gpu_ast::Top::FunDef {
                 ret_ty: gpu_ast::Type::Void, id: id("f"), params: vec![],
-                body, target: gpu_ast::Target::Host
+                body, target: gpu_ast::Target::Host, i: i()
             }
         ]
     }

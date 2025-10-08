@@ -10,6 +10,7 @@ use crate::utils::name::Name;
 use crate::utils::pprint::PrettyPrint;
 use crate::utils::reduce;
 use crate::utils::smap::*;
+use crate::utils::substitute::SubVars;
 
 use itertools::Itertools;
 use pyo3::prelude::*;
@@ -202,18 +203,6 @@ fn insert_slice_dim_ids(ids: &[Name], e: Expr) -> Expr {
     }
 }
 
-fn substitute_variables(e: Expr, subs: &BTreeMap<Name, Expr>) -> Expr {
-    match e {
-        Expr::Var {id, ty, i} => {
-            match subs.get(&id) {
-                Some(e) => e.clone(),
-                None => Expr::Var {id, ty, i}
-            }
-        },
-        _ => e.smap(|e| substitute_variables(e, subs))
-    }
-}
-
 fn mk_int(v: i128, scalar_sizes: &ScalarSizes, i: &Info) -> Expr {
     let ty = Type::fixed_scalar(scalar_sizes.int.clone());
     Expr::Int {v, ty, i: i.clone()}
@@ -264,7 +253,7 @@ fn derive_dims_from_reduce_id(
     let sub_map = derive_dims_from_reduce_id_helper(
         BTreeMap::new(), &dims[..], &reduce_var, &scalar_sizes
     );
-    substitute_variables(e, &sub_map)
+    e.sub_vars(&sub_map)
 }
 
 enum ReduceTargetType {
@@ -487,7 +476,7 @@ fn replace_slices_fun_def(def: FunDef, scalar_sizes: &ScalarSizes) -> PyResult<F
 
 fn replace_slices_top(t: Top, scalar_sizes: &ScalarSizes) -> PyResult<Top> {
     match t {
-        Top::ExtDecl {..} => Ok(t),
+        Top::CallbackDecl {..} | Top::ExtDecl {..} => Ok(t),
         Top::FunDef {v} => Ok(Top::FunDef {v: replace_slices_fun_def(v, scalar_sizes)?})
     }
 }
@@ -513,7 +502,7 @@ fn ensure_no_remaining_slices_fun_def(def: FunDef) -> PyResult<FunDef> {
 
 fn ensure_no_remaining_slices_top(t: Top) -> PyResult<Top> {
     match t {
-        Top::ExtDecl {..} => Ok(t),
+        Top::CallbackDecl {..} | Top::ExtDecl {..} => Ok(t),
         Top::FunDef {v} => Ok(Top::FunDef {v: ensure_no_remaining_slices_fun_def(v)?})
     }
 }

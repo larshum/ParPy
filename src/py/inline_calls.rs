@@ -5,6 +5,7 @@ use crate::utils::info::{Info, InfoNode};
 use crate::utils::name::Name;
 use crate::utils::pprint::PrettyPrint;
 use crate::utils::smap::{SFold, SMapAccum};
+use crate::utils::substitute::SubVars;
 
 use pyo3::prelude::*;
 use pyo3::types::*;
@@ -33,29 +34,6 @@ fn construct_sub_map(
     }
 }
 
-fn substitute_variables_expr(e: Expr, sub_map: &BTreeMap<Name, Expr>) -> Expr {
-    match e {
-        Expr::Var {id, i, ..} if sub_map.contains_key(&id) => {
-            let e = sub_map.get(&id).unwrap().clone();
-            e.with_info(i)
-        },
-        Expr::Var {..} | Expr::String {..} | Expr::Bool {..} | Expr::Int {..} |
-        Expr::Float {..} | Expr::UnOp {..} | Expr::BinOp {..} |
-        Expr::ReduceOp {..} | Expr::IfExpr {..} | Expr::Subscript {..} |
-        Expr::Slice {..} | Expr::Tuple {..} | Expr::Call {..} |
-        Expr::Convert {..} | Expr::GpuContext {..} | Expr::Inline {..} |
-        Expr::Label {..} | Expr::StaticBackendEq {..} | Expr::StaticTypesEq {..} |
-        Expr::StaticFail {..} => {
-            e.smap(|e| substitute_variables_expr(e, sub_map))
-        }
-    }
-}
-
-fn substitute_variables_stmt(s: Stmt, sub_map: &BTreeMap<Name, Expr>) -> Stmt {
-    s.smap(|s| substitute_variables_stmt(s, sub_map))
-        .smap(|e| substitute_variables_expr(e, sub_map))
-}
-
 fn inline_function_calls_stmt<'py>(
     mut acc: Vec<Stmt>,
     stmt: Stmt,
@@ -70,9 +48,12 @@ fn inline_function_calls_stmt<'py>(
                         match t {
                             Top::FunDef {v: fun} => {
                                 let sub_map = construct_sub_map(fun.params, args, &fun.id, &fun.i)?;
-                                let mut body = fun.body.smap(|s| substitute_variables_stmt(s, &sub_map));
+                                let mut body = fun.body.smap(|s| s.sub_vars(&sub_map));
                                 acc.append(&mut body);
                                 Ok(())
+                            },
+                            Top::CallbackDecl {id, ..} => {
+                                py_runtime_error!(i, "Cannot inline call to callback function {id}")
                             },
                             Top::ExtDecl {id, ..} => {
                                 py_runtime_error!(i, "Cannot inline call to external function {id}")
@@ -154,7 +135,7 @@ mod test {
     #[test]
     fn sub_vars_empty_map() {
         let s = assignment(var("a", Type::Unknown), var("b", Type::Unknown));
-        assert_eq!(substitute_variables_stmt(s.clone(), &BTreeMap::new()), s);
+        assert_eq!(s.clone().sub_vars(&BTreeMap::new()), s);
     }
 
     #[test]
@@ -163,7 +144,7 @@ mod test {
         let mut sub_map = BTreeMap::new();
         sub_map.insert(id("a"), var("c", Type::Unknown));
         let expected = assignment(var("c", Type::Unknown), var("b", Type::Unknown));
-        assert_eq!(substitute_variables_stmt(s.clone(), &sub_map), expected);
+        assert_eq!(s.sub_vars(&sub_map), expected);
     }
 
     #[test]
@@ -172,6 +153,6 @@ mod test {
         let mut sub_map = BTreeMap::new();
         sub_map.insert(id("b"), int(1, None));
         let expected = assignment(var("a", Type::Unknown), int(1, None));
-        assert_eq!(substitute_variables_stmt(s, &sub_map), expected);
+        assert_eq!(s.sub_vars(&sub_map), expected);
     }
 }

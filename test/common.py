@@ -59,4 +59,5 @@ def par_opts(backend, p):
     opts.parallelize = p
     opts.verbose_backend_resolution = True
     opts.debug_print = True
+    opts.debug_callbacks = True
     return opts
