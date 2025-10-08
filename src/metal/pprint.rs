@@ -240,11 +240,15 @@ impl PrettyPrint for Expr {
                 // The library code is included as a string literal. We escape the end of each line
                 // with a newline to get proper errors of the generated Metal code. We also add a
                 // backslash as required for multi-line string literals.
-                let (env, tops) = pprint_iter(tops.iter(), env, "\n");
-                let tops = tops.lines()
-                    .map(|l| format!("{l}\\n\\"))
-                    .join("\n");
-                (env, format!("parpy_metal::load_library(\"\\\n{tops}\n\")"))
+                if tops.is_empty() {
+                    (env, format!("NULL"))
+                } else {
+                    let (env, tops) = pprint_iter(tops.iter(), env, "\n");
+                    let tops = tops.lines()
+                        .map(|l| format!("{l}\\n\\"))
+                        .join("\n");
+                    (env, format!("parpy_metal::load_library(\"\\\n{tops}\n\")"))
+                }
             },
         }
     }
