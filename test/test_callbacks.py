@@ -14,7 +14,8 @@ R = symbol()
 @parpy.callback
 def gemm(alpha, beta, A, B, C):
     A_t, B_t, C_t = A.torch(), B.torch(), C.torch()
-    C_t[:, :] = alpha * A_t @ B_t + beta * C_t
+    C_t = alpha * A_t @ B_t + beta * C_t
+    C.copy_from(C_t)
 
 @parpy.jit
 def ones_init(C: buffer(T, [M, N])):

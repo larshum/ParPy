@@ -27,15 +27,12 @@ extern "C" int32_t parpy_sync() {
   return 0;
 }
 
-extern "C" metal_buffer *parpy_alloc_buffer(int64_t nbytes) {
-  MTL::Buffer *buf = device->newBuffer(nbytes, MTL::ResourceStorageModeShared);
-  if (buf == nullptr) {
+extern "C" MTL::Buffer *parpy_alloc_buffer(int64_t nbytes) {
+  MTL::Buffer *b = device->newBuffer(nbytes, MTL::ResourceStorageModeShared);
+  if (b == nullptr) {
     parpy_metal::error_message = "Failed to allocate buffer";
     return nullptr;
   }
-  metal_buffer *b = (metal_buffer*)malloc(sizeof(metal_buffer));
-  b->buf = buf;
-  b->offset = 0;
   return b;
 }
 
@@ -43,8 +40,16 @@ extern "C" void *parpy_ptr_buffer(metal_buffer *b) {
   return b->buf->contents();
 }
 
-extern "C" void parpy_buffer_set_offset(metal_buffer *b, int64_t offset) {
-  b->offset = offset;
+extern "C" metal_buffer *parpy_buffer_wrap_with_offset(MTL::Buffer *b, int64_t offset) {
+  metal_buffer *buf = (metal_buffer*)malloc(sizeof(metal_buffer));
+  buf->buf = b;
+  buf->offset = offset;
+  return buf;
+}
+
+extern "C" int32_t parpy_buffer_wrap_free(metal_buffer *b) {
+  free(b);
+  return 0;
 }
 
 extern "C" int32_t parpy_memcpy(void *dst, void *src, int64_t nbytes, int64_t k) {
@@ -56,8 +61,21 @@ extern "C" int32_t parpy_memcpy(void *dst, void *src, int64_t nbytes, int64_t k)
   //  1: source is in host memory, destination on device
   //  2: source is in device memory, destination on host
   //  3: both device
-  dst = k & 1 ? ((metal_buffer*)dst)->buf->contents() : dst;
-  src = k & 2 ? ((metal_buffer*)src)->buf->contents() : src;
+  if (k & 1) {
+    metal_buffer *b = (metal_buffer*)dst;
+    dst = (void*)((char*)b->buf->contents() + b->offset);
+  }
+  if (k & 2) {
+    metal_buffer *b = (metal_buffer*)src;
+    src = (void*)((char*)b->buf->contents() + b->offset);
+  }
+  memcpy(dst, src, nbytes);
+  return 0;
+}
+
+extern "C" int32_t parpy_memcpy_buffer(void *dst, void *src, int64_t nbytes, int64_t k) {
+  dst = k & 1 ? ((MTL::Buffer*)dst)->contents() : dst;
+  src = k & 2 ? ((MTL::Buffer*)src)->contents() : src;
   memcpy(dst, src, nbytes);
   return 0;
 }
@@ -67,9 +85,8 @@ extern "C" int32_t parpy_memset(void *ptr, int64_t nbytes, int8_t value) {
   return 0;
 }
 
-extern "C" int32_t parpy_free_buffer(metal_buffer *b) {
-  b->buf->release();
-  free(b);
+extern "C" int32_t parpy_free_buffer(MTL::Buffer *b) {
+  b->release();
   return 0;
 }
 
@@ -100,7 +117,12 @@ namespace parpy_metal {
   }
 
   int32_t alloc(metal_buffer **buf, int64_t nbytes) {
-    *buf = parpy_alloc_buffer(nbytes);
+    MTL::Buffer *b = parpy_alloc_buffer(nbytes);
+    if (b == nullptr) {
+      parpy_metal::error_message = "Buffer allocation failed";
+      return 1;
+    }
+    *buf = parpy_buffer_wrap_with_offset(b, 0);
     if (*buf == nullptr) {
       parpy_metal::error_message = "Buffer allocation failed";
       return 1;
@@ -109,7 +131,8 @@ namespace parpy_metal {
   }
 
   void free(metal_buffer *b) {
-    parpy_free_buffer(b);
+    parpy_free_buffer(b->buf);
+    parpy_buffer_wrap_free(b);
   }
 
   void copy(void *dst, void *src, int64_t nbytes, int64_t k) {
