@@ -8,8 +8,6 @@ use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::smap::*;
 
-use std::collections::BTreeMap;
-
 #[derive(Clone, Debug)]
 pub struct Callback {
     pub id: Name,
@@ -47,6 +45,46 @@ fn py_to_gpu_type(ty: py_ast::Type) -> Type {
     }
 }
 
+fn generate_callback(
+    s: Stmt,
+    callback_id: Name,
+    i: Info
+) -> (Callback, Stmt) {
+    let fvs = s.free_vars();
+    let params = fvs.clone()
+        .into_iter()
+        .map(|(id, ty)| py_ast::Param {id, ty, i: Info::default()})
+        .collect::<Vec<py_ast::Param>>();
+    let fv_args = fvs.into_iter()
+        .map(|(id, ty)| Expr::Var {
+            id: id.clone(),
+            ty: py_to_gpu_type(ty.clone()),
+            i: Info::default()
+        })
+        .collect::<Vec<Expr>>();
+    let arg_types = fv_args.iter()
+        .map(|e| e.get_type().clone())
+        .collect::<Vec<Type>>();
+    let ty = Type::Pointer {
+        ty: Box::new(Type::Function {
+            result: Box::new(Type::Void),
+            args: arg_types
+        }),
+        mem: MemSpace::Host
+    };
+    let callback_wrap_stmt = Stmt::Expr {
+        e: Expr::Call {
+            id: callback_id.clone(),
+            args: fv_args,
+            ty: Type::Void,
+            i: i.clone()
+        },
+        i
+    };
+    ( Callback {id: callback_id, params, ty, body: s}
+    , callback_wrap_stmt )
+}
+
 fn collect_used_callbacks_stmt(
     mut acc: Vec<Callback>,
     s: Stmt
@@ -54,39 +92,19 @@ fn collect_used_callbacks_stmt(
     match s {
         Stmt::For {ref body, ..} => {
             if let Some((id, i)) = extract_callback(&body) {
-                let fvs: BTreeMap<Name, py_ast::Type> = s.free_vars();
-                let params = fvs.clone()
-                    .into_iter()
-                    .map(|(id, ty)| py_ast::Param {id, ty, i: Info::default()})
-                    .collect::<Vec<py_ast::Param>>();
-                let fv_args = fvs.into_iter()
-                    .map(|(id, ty)| Expr::Var {
-                        id: id.clone(),
-                        ty: py_to_gpu_type(ty.clone()),
-                        i: Info::default()
-                    })
-                    .collect::<Vec<Expr>>();
-                let arg_types = fv_args.iter()
-                    .map(|e| e.get_type().clone())
-                    .collect::<Vec<Type>>();
-                let ty = Type::Pointer {
-                    ty: Box::new(Type::Function {
-                        result: Box::new(Type::Void),
-                        args: arg_types
-                    }),
-                    mem: MemSpace::Host
-                };
-                let wrap_callback_stmt = Stmt::Expr {
-                    e: Expr::Call {
-                        id: id.clone(),
-                        args: fv_args,
-                        ty: Type::Void,
-                        i: i.clone()
-                    },
-                    i
-                };
-                acc.push(Callback {id, params, ty, body: s});
-                (acc, wrap_callback_stmt)
+                let (callback, callback_wrap_stmt) = generate_callback(s, id, i);
+                acc.push(callback);
+                (acc, callback_wrap_stmt)
+            } else {
+                s.smap_accum_l(acc, collect_used_callbacks_stmt)
+            }
+        },
+        Stmt::Expr {ref e, ..} => {
+            if let Expr::PyCallback {id, i, ..} = &e {
+                let (id, i) = (id.clone(), i.clone());
+                let (callback, callback_wrap_stmt) = generate_callback(s, id, i);
+                acc.push(callback);
+                (acc, callback_wrap_stmt)
             } else {
                 s.smap_accum_l(acc, collect_used_callbacks_stmt)
             }

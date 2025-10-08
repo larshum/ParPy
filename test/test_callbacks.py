@@ -78,3 +78,36 @@ def test_callback_performs_jit(backend):
         first_entry(b, opts=par_opts(backend, {'M': parpy.threads(32)}))
         assert torch.allclose(a + 1.0, b)
     run_if_backend_is_enabled(backend, helper)
+
+@parpy.callback
+def odd_callback(a, x):
+    a_t = a.torch()
+    a_t[1,:] += x
+    # We don't need to copy if we run this on CUDA
+    if a.backend != parpy.CompileBackend.Cuda:
+        a.copy_from(a_t)
+
+@parpy.callback
+def even_callback(a, x):
+    a_t = a.torch()
+    a_t[0,:] += x
+    # We don't need to copy if we run this on CUDA
+    if a.backend != parpy.CompileBackend.Cuda:
+        a.copy_from(a_t)
+
+@parpy.jit
+def cond_write(a, x):
+    with parpy.gpu:
+        a[0] = a[0]
+    if x & 1 == 0:
+        odd_callback(a, x)
+    else:
+        even_callback(a, x)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_conditional_callback(backend):
+    def helper():
+        a = torch.zeros(2, 10, dtype=torch.float32)
+        cond_write(a, 0, opts=par_opts(backend, {}))
+        cond_write(a, 1, opts=par_opts(backend, {}))
+    run_if_backend_is_enabled(backend, helper)
