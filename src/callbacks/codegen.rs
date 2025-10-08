@@ -204,15 +204,29 @@ fn generate_callback_body(
         .collect::<CompileResult<Vec<py_ast::Stmt>>>()
 }
 
+fn strip_parameter_type(p: py_ast::Param) -> py_ast::Param {
+    py_ast::Param {ty: py_ast::Type::Unknown, ..p}
+}
+
+fn strip_parameter_types(params: Vec<py_ast::Param>) -> Vec<py_ast::Param> {
+    params.into_iter()
+        .map(strip_parameter_type)
+        .collect::<Vec<py_ast::Param>>()
+}
+
 fn generate_callback_function(
     opts: &CompileOptions,
     callback: Callback
 ) -> CompileResult<py_ast::Ast> {
     let callback_id = Name::new(format!("{}_wrapper", callback.id)).with_new_sym();
     let callback_body = generate_callback_body(&opts, callback.params.clone(), callback.body)?;
+    // NOTE(larshum 2025-10-08): This generated callback function receives raw C pointers and
+    // converts them into objects usable from Python. To avoid confusion, we strip the annotated
+    // types of the parameters as they are not accurate with this in mind.
+    let callback_params = strip_parameter_types(callback.params);
     let main = py_ast::FunDef {
         id: callback_id,
-        params: callback.params,
+        params: callback_params,
         body: callback_body,
         res_ty: py_ast::Type::Void,
         i: Info::default()
