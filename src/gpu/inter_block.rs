@@ -537,7 +537,6 @@ fn hoist_chunk(
                 // synchronization point is at the end of a chunk. We place each chunk inside the
                 // outer parallel for-loop.
                 let inner_stmts = seq_body.split_inclusive(is_inter_block_sync_point)
-                    .filter(|chunk| !chunk.is_empty())
                     .map(|chunk| {
                         let s = Stmt::For {
                             var: var.clone(),
@@ -779,15 +778,31 @@ fn eliminate_unnecessary_synchronization_points_stmts(
             stmts.pop();
         }
     }
-    stmts.into_iter()
-        .fold(vec![], |acc, s| {
-            eliminate_unnecessary_synchronization_points_stmt(env.clone(), acc, s)
-        })
+    stmts.sflatten(vec![], |acc, s| {
+        eliminate_unnecessary_synchronization_points_stmt(env.clone(), acc, s)
+    })
 }
 
 fn eliminate_unnecessary_synchronization_points(body: Vec<Stmt>) -> Vec<Stmt> {
     let env = SyncPointEnv::new();
     eliminate_unnecessary_synchronization_points_stmts(env, body)
+}
+
+fn remove_empty_loop_nests_stmt(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
+    match s {
+        Stmt::For {var, lo, hi, step, body, par, i} => {
+            let body = remove_empty_loop_nests(body);
+            if !body.is_empty() {
+                acc.push(Stmt::For {var, lo, hi, step, body, par, i});
+            }
+            acc
+        },
+        _ => s.sflatten(acc, remove_empty_loop_nests_stmt)
+    }
+}
+
+fn remove_empty_loop_nests(body: Vec<Stmt>) -> Vec<Stmt> {
+    body.sflatten(vec![], remove_empty_loop_nests_stmt)
 }
 
 fn resymbolize_duplicated_loops_stmt(
@@ -1177,6 +1192,9 @@ pub fn restructure_inter_block_synchronization(
     // unnecessary either if it occurs outside of parallel code or if it occurs at the end of a
     // parallel for-loop.
     let body = eliminate_unnecessary_synchronization_points(body);
+
+    // Removes any empty loop nests produced as a result of the inter-block transformation.
+    let body = remove_empty_loop_nests(body);
 
     // After hoisting, the code may be restructured such that the definition and the use(s) of a
     // local variable end up in separate parallel kernels. First, we promote assignments to
@@ -1786,5 +1804,37 @@ mod test {
             for_("x", 10, vec![assign(uvar("i"), int(9, None))])
         ];
         assert_hoist(body, expected)
+    }
+
+    #[test]
+    fn remove_loop_with_empty_body() {
+        let body = vec![
+            for_("x", 10, vec![])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), vec![]);
+    }
+
+    #[test]
+    fn remove_nested_empty_loop() {
+        let body = vec![
+            for_("x", 10, vec![for_("y", 10, vec![])])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), vec![]);
+    }
+
+    #[test]
+    fn remove_inner_nested_empty_loop() {
+        let body = vec![
+            for_("x", 10, vec![for_("y", 10, vec![
+                assign(uvar("a"), int(0, None))
+            ])]),
+            for_("z", 10, vec![for_("w", 10, vec![])])
+        ];
+        let expected = vec![
+            for_("x", 10, vec![for_("y", 10, vec![
+                assign(uvar("a"), int(0, None))
+            ])])
+        ];
+        assert_eq!(remove_empty_loop_nests(body), expected);
     }
 }
