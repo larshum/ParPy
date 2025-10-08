@@ -8,6 +8,18 @@ use crate::utils::pprint::PrettyPrint;
 
 use pyo3::prelude::*;
 
+fn print_callback_asts(opts: &CompileOptions, callbacks: &Vec<String>) {
+    // When the compiler option is enabled, and we have at least one callback function, we print
+    // them to the terminal along with a unique message to keep it distinct from debug messages
+    // produced by other parts of the compiler.
+    if opts.debug_callbacks && !callbacks.is_empty() {
+        let bounds = "=".repeat(5);
+        println!("{0} START GENERATED CALLBACKS {0}\n", bounds);
+        callbacks.iter().for_each(|s| println!("{s}\n"));
+        println!("{0} END GENERATED CALLBACKS {0}\n", bounds);
+    }
+}
+
 pub fn from_gpu_ast<'py>(
     opts: &CompileOptions,
     gpu_ast: gpu_ast::Ast,
@@ -33,6 +45,7 @@ pub fn from_gpu_ast<'py>(
     let callback_asts = callback_asts.into_iter()
         .map(|ast| ast.pprint_default())
         .collect::<Vec<String>>();
+    print_callback_asts(&opts, &callback_asts);
 
     Ok((entry_point_argtypes, callback_asts, gpu_ast))
 }

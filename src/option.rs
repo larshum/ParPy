@@ -33,6 +33,11 @@ pub struct CompileOptions {
     #[pyo3(get, set)]
     pub debug_print: bool,
 
+    // Enable to have the compiler print the generated Python code for callback wrappers, which
+    // handles the conversion from raw data to a Python object you can operate on.
+    #[pyo3(get, set)]
+    pub debug_callbacks: bool,
+
     // Enable to have the compiler write the generated source code for the target backend to a
     // file.
     #[pyo3(get, set)]
@@ -98,6 +103,7 @@ impl Default for CompileOptions {
             parallelize: BTreeMap::new(),
             verbose_backend_resolution: false,
             debug_print: false,
+            debug_callbacks: false,
             write_output: false,
             backend: CompileBackend::Auto,
             use_cuda_thread_block_clusters: false,
