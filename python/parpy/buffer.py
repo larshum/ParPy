@@ -164,6 +164,9 @@ class BaseBuffer:
     def _deconstruct(self, src_ptr):
         pass
 
+    def sync(self):
+        pass
+
 class CudaBaseBuffer(BaseBuffer):
     def __init__(self, buf, nbytes, src=None, is_raw=False):
         super().__init__(buf, nbytes, src, is_raw)
@@ -374,9 +377,7 @@ class CudaBuffer(Buffer):
     def copy_from(self, t):
         _, shape, dtype = _extract_array_interface(t, allow_cuda=True)
         if self.shape == shape and self.dtype == dtype:
-            import math
-            one_dim_size = math.prod(shape)
-            self.buf.buf.reshape(one_dim_size)[:] = t.reshape(one_dim_size)
+            self.torch()[:] = t
         else:
             raise ValueError(f"Cannot copy data from array of shape {shape} and type {dtype} to CUDA buffer of shape {self.shape} and type {self.dtype}")
 
