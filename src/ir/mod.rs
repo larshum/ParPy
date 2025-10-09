@@ -2,6 +2,8 @@ pub mod ast;
 mod constant_fold;
 mod eliminate_gpu_context;
 mod from_py_ast;
+mod inter_block;
+mod par_tree;
 mod pprint;
 mod struct_types;
 mod tpb;
@@ -35,6 +37,11 @@ pub fn from_python(
     debug_env.print("Initial IR AST", &ast);
     let ast = tpb::propagate_configuration(ast)?;
     let ast = eliminate_gpu_context::apply(ast)?;
+    let ast = constant_fold::fold(ast);
     debug_env.print("IR AST after eliminating excessive for-loops", &ast);
-    Ok(constant_fold::fold(ast))
+
+    let ast = inter_block::restructure_inter_block_synchronization(ast, &target_mapping, &opts)?;
+    debug_env.print("IR AST after GPU inter-block transformation", &ast);
+
+    Ok(ast)
 }
