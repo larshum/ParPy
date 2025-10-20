@@ -272,3 +272,81 @@ def test_call_other_module_function(backend):
         elif backend == parpy.CompileBackend.Metal:
             assert x[0] == 1
     run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_call_host_external(backend):
+    def helper():
+        if backend == parpy.CompileBackend.Cuda:
+            header = "<cuda_utils.h>"
+        elif backend == parpy.CompileBackend.Metal:
+            header = "<metal_utils.h>"
+        else:
+            print(f"Unsupported backend {backend}")
+
+        @parpy.external("add_host", backend, parpy.Target.Host, header=header)
+        def add_host(x: parpy.types.F32, y: parpy.types.F32) -> parpy.types.F32:
+            return x + y
+        @parpy.jit
+        def call_func(x, y):
+            z = add_host(x, 1.0)
+            with parpy.gpu:
+                for i in range(10):
+                    y[i] = z
+        y = torch.zeros((10,), dtype=torch.float32)
+        opts = par_opts(backend, {})
+        opts.includes += ['test/code']
+        call_func(2.5, y, opts=opts)
+        assert torch.allclose(y, torch.full((10,), 3.5))
+    run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_call_host_and_device_codegen(backend):
+    @parpy.external("host_dummy", backend, parpy.Target.Host)
+    def host_func(x: parpy.types.F32, y: parpy.types.F32) -> parpy.types.F32:
+        return x + y
+    @parpy.external("device_dummy", backend, parpy.Target.Device)
+    def device_func(x: parpy.types.F32, y: parpy.types.F32) -> parpy.types.F32:
+        return x + y
+
+    # Invalid definition - we cannot mix use of host and device functions.
+    @parpy.jit
+    def func1(x, y, z):
+        return host_func(x, device_func(y, z))
+
+    @parpy.jit
+    def func2(x, y, z):
+        return x + host_func(y, z)
+
+    @parpy.jit
+    def func3(x, y, z):
+        return device_func(x, y) + z
+
+    a = 1.0
+    b = 1.5
+    c = 2.0
+    d = 2.5
+    N, M = 10, 15
+    x = torch.zeros((N, M), dtype=torch.float32)
+    opts = par_opts(backend, {'N': parpy.threads(N), 'M': parpy.threads(M)})
+
+    N = parpy.types.symbol()
+    M = parpy.types.symbol()
+
+    # Invalid call, we use a function that involves both host and device code...
+    @parpy.jit
+    def entry1(x: parpy.types.buffer(parpy.types.F32, [N, M]), a, b, c, d):
+        for i in range(N):
+            for j in range(M):
+                x[i, j] = func2(a, b, c)
+    with pytest.raises(RuntimeError) as e_info:
+        parpy.print_compiled(entry1, [x, a, b, c, d], opts=opts)
+    assert e_info.match("Host function returning a non-void value")
+
+    # Valid call, no errors expected here
+    @parpy.jit
+    def entry2(x: parpy.types.buffer(parpy.types.F32, [N, M]), a, b, c, d):
+        for i in range(N):
+            for j in range(M):
+                x[i, j] = func3(x[i, j], c, d)
+    code = parpy.print_compiled(entry2, [x, a, b, c, d], opts=opts)
+    assert len(code) != 0

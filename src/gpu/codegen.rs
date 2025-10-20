@@ -2,8 +2,10 @@ use super::ast::*;
 use super::free_vars;
 use super::par::{GpuMap, GpuMapping};
 use crate::parpy_compile_error;
+use crate::parpy_internal_error;
 use crate::option::CompileOptions;
 use crate::ir::ast as ir_ast;
+use crate::ir::TargetClass;
 use crate::utils::ast::ExprType;
 use crate::utils::err::*;
 use crate::utils::info::*;
@@ -13,6 +15,7 @@ use std::collections::BTreeMap;
 
 #[derive(Debug)]
 struct CodegenEnv<'a> {
+    classification: BTreeMap<Name, TargetClass>,
     gpu_mapping: BTreeMap<Name, GpuMapping>,
     struct_fields: BTreeMap<Name, Vec<Field>>,
     opts: &'a CompileOptions
@@ -600,11 +603,21 @@ fn from_ir_top(
             Ok((env, Top::ExtDecl {ret_ty, id, ext_id, params, target, header, i}))
         },
         ir_ast::Top::FunDef {v: ir_ast::FunDef {id, params, body, res_ty, i}} => {
+            let target = match env.classification.get(&id) {
+                Some(target_class) => match target_class {
+                    TargetClass::Host => Ok(Target::Host),
+                    TargetClass::Device => Ok(Target::Device),
+                    TargetClass::Both => {
+                        parpy_internal_error!(i, "Found function {id} classified as both in GPU codegen")
+                    }
+                },
+                None => Ok(Target::Host),
+            }?;
             let params = from_ir_params(params);
             let ret_ty = from_ir_type(res_ty);
             let (body, kernel_tops) = from_ir_stmts(&env, &id, vec![], vec![], body)?;
             if kernel_tops.is_empty() {
-                Ok((env, Top::FunDef {ret_ty, id, params, body, target: Target::Device, i}))
+                Ok((env, Top::FunDef {ret_ty, id, params, body, target, i}))
             } else {
                 parpy_compile_error!(
                     i,
@@ -616,11 +629,17 @@ fn from_ir_top(
 }
 
 pub fn from_general_ir(
-    opts: &CompileOptions,
     ast: ir_ast::Ast,
-    gpu_mapping: BTreeMap<Name, GpuMapping>
+    classification: BTreeMap<Name, TargetClass>,
+    gpu_mapping: BTreeMap<Name, GpuMapping>,
+    opts: &CompileOptions
 ) -> CompileResult<Ast> {
-    let env = CodegenEnv {gpu_mapping, struct_fields: BTreeMap::new(), opts};
+    let env = CodegenEnv {
+        classification,
+        gpu_mapping,
+        struct_fields: BTreeMap::new(),
+        opts
+    };
     let (env, mut tops) = ast.tops.into_iter()
         .fold(Ok((env, vec![])), |acc, t| {
             let (env, mut tops) = acc?;
@@ -643,6 +662,7 @@ mod test {
 
     fn mk_env<'a>(opts: &'a CompileOptions) -> CodegenEnv<'a> {
         CodegenEnv {
+            classification: BTreeMap::new(),
             gpu_mapping: BTreeMap::new(),
             struct_fields: BTreeMap::new(),
             opts
@@ -1061,7 +1081,7 @@ mod test {
         let (_, top) = from_ir_top(env, ir_ast::Top::FunDef {v}).unwrap();
         let expected = Top::FunDef {
             ret_ty: Type::Void, id: id("f"), params: vec![], body: vec![],
-            target: Target::Device, i: i()
+            target: Target::Host, i: i()
         };
         assert_eq!(top, expected);
     }

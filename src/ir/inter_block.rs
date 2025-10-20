@@ -1,9 +1,10 @@
+use super::ast::*;
 use super::par_tree;
+use super::target_constraints::TargetConstraint;
 use crate::option;
 use crate::par;
 use crate::parpy_compile_error;
 use crate::option::CompileOptions;
-use crate::ir::ast::*;
 use crate::utils::ast::ScalarSizes;
 use crate::utils::err::*;
 use crate::utils::info::*;
@@ -15,14 +16,16 @@ use crate::utils::substitute::SubVars;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-fn collect_host_functions(mut acc: BTreeSet<Name>, t: &Top) -> BTreeSet<Name> {
-    match t {
-        Top::ExtDecl {id, target: Target::Host, ..} => {
-            acc.insert(id.clone());
-            acc
-        },
-        _ => acc
-    }
+fn collect_host_functions(
+    mapping: &BTreeMap<Name, TargetConstraint>
+) -> BTreeSet<Name> {
+    mapping.iter()
+        .filter(|(_, cls)| match cls {
+            TargetConstraint::HostOnly => true,
+            _ => false
+        })
+        .map(|(id, _)| id.clone())
+        .collect::<BTreeSet<Name>>()
 }
 
 fn insert_synchronization_points_stmt(
@@ -1158,14 +1161,17 @@ fn remove_parallelism_of_host_loop_nests(
 /// allocated for representing local variables that are defined and used in separate kernels after
 /// transforming the AST. These are performed to restore the AST to a valid state.
 pub fn restructure_inter_block_synchronization(
-    opts: &option::CompileOptions,
-    ast: Ast
+    ast: Ast,
+    mapping: &BTreeMap<Name, TargetConstraint>,
+    opts: &option::CompileOptions
 ) -> CompileResult<Ast> {
     // NOTE: We only apply this to the main function definition, which is the last one in the list.
     // The others are assumed to contain no parallelism.
     let FunDef {id, params, body, res_ty, i} = ast.main;
 
-    let host_functions = ast.tops.sfold(BTreeSet::new(), collect_host_functions);
+    // We construct a set of the names of all host functions based on the target mapping results.
+    // Host functions are those where the target constraints were identified as 'HostOnly'.
+    let host_functions = collect_host_functions(&mapping);
 
     // Insert a synchronization point at the end of each parallel for-loop, and determine for each
     // of them whether they require inter-block synchronization.

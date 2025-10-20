@@ -33,3 +33,7 @@ __device__ float warp_sum(float *values) {
 __device__ int64_t matmul_template_float(float *x, float *y, float *z, int64_t N, int64_t M, int64_t K) {
   return 0;
 }
+
+float add_host(float x, float y) {
+  return x + y;
+}

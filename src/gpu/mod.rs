@@ -4,11 +4,10 @@ mod constant_fold;
 pub mod flatten_structs;
 mod free_vars;
 mod global_mem;
-mod inter_block;
 mod par;
-mod par_tree;
 mod pprint;
 mod reduce;
+mod split_function_targets;
 mod sync_elim;
 
 #[cfg(test)]
@@ -17,24 +16,30 @@ pub mod ast_builder;
 use ast::*;
 use crate::option::CompileOptions;
 use crate::ir::ast as ir_ast;
+use crate::ir::TargetClass;
 use crate::utils::debug::*;
 use crate::utils::err::*;
+use crate::utils::name::Name;
+
+use std::collections::BTreeMap;
 
 pub fn from_general_ir(
     ast: ir_ast::Ast,
+    classification: BTreeMap<Name, TargetClass>,
     opts: &CompileOptions,
     debug_env: &DebugEnv
 ) -> CompileResult<Ast> {
-    let ast = inter_block::restructure_inter_block_synchronization(opts, ast)?;
-    debug_env.print("IR AST after GPU inter-block transformation", &ast);
-
     // Identify the parallel structure in the IR AST and use this to determine how to map each
     // outermost parallel for-loop to the blocks and threads of a GPU kernel.
     let par = par::find_parallel_structure(&ast)?;
     let gpu_mapping = par::map_gpu_grid(par);
 
+    // Functions assigned TargetClass::Both are split into two separate versions, depending on
+    // whether they are called from the host or from the device.
+    let (ast, classification) = split_function_targets::apply(ast, classification)?;
+
     // Translate the general IR AST to a representation used for all GPU targets.
-    let ast = codegen::from_general_ir(opts, ast, gpu_mapping)?;
+    let ast = codegen::from_general_ir(ast, classification, gpu_mapping, opts)?;
     debug_env.print("GPU AST", &ast);
 
     // Expand intermediate parallel reductions node to proper for-loops in the GPU IR AST.

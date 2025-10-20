@@ -56,7 +56,7 @@ def test_metal_host_external():
     backend = parpy.CompileBackend.Metal
     def helper():
         import parpy.types as types
-        @parpy.external("add_metal_host", backend, parpy.Target.Host, header="<metal_utils.h>")
+        @parpy.external("add_host", backend, parpy.Target.Host, header="<metal_utils.h>")
         def add_metal(x: types.F32, y: types.F32) -> types.F32:
             return x + y
 
