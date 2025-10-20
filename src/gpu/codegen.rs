@@ -662,6 +662,7 @@ mod test {
 
     fn mk_env<'a>(opts: &'a CompileOptions) -> CodegenEnv<'a> {
         CodegenEnv {
+            classification: BTreeMap::new(),
             gpu_mapping: BTreeMap::new(),
             struct_fields: BTreeMap::new(),
             opts
@@ -1080,7 +1081,7 @@ mod test {
         let (_, top) = from_ir_top(env, ir_ast::Top::FunDef {v}).unwrap();
         let expected = Top::FunDef {
             ret_ty: Type::Void, id: id("f"), params: vec![], body: vec![],
-            target: Target::Device, i: i()
+            target: Target::Host, i: i()
         };
         assert_eq!(top, expected);
     }
