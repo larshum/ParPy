@@ -197,12 +197,6 @@ def test_call_external_distinct_shapes_cuda():
         assert torch.allclose(out, torch.sum(x) + torch.sum(y))
     run_if_backend_is_enabled(backend, helper)
 
-def test_host_external_cuda_fails():
-    with pytest.raises(RuntimeError, match="Host externals are not supported in the CUDA backend"):
-        @parpy.external("dummy", backend, parpy.Target.Host)
-        def cu_id(x: types.I64) -> types.I64:
-            return x
-
 def test_block_parallel_external_cuda():
     def helper():
         N = types.symbol()

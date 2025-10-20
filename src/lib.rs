@@ -106,14 +106,14 @@ fn compile_ir<'py>(
     // * Inserts top-level struct definitions for each Python dictionary.
     // * Replaces uses of tuples for indexing with an integer expression.
     // * Adds the parallelization arguments directly to the AST.
-    let ir_ast = ir::from_python(py_ast, &opts, &debug_env)?;
+    let (ir_ast, classification) = ir::from_python(py_ast, &opts, &debug_env)?;
     debug_env.print("IR AST", &ir_ast);
 
     // Convert the IR AST to a GPU AST. The main difference between these two ASTs is that the GPU
     // AST distinguishes between code running on the host (CPU) and on the device (GPU). Further,
     // it includes constructs exclusive to GPU programming, such as thread and block indexing and
     // statements representing the allocation of shared memory.
-    let gpu_ast = gpu::from_general_ir(ir_ast, &opts, &debug_env)?;
+    let gpu_ast = gpu::from_general_ir(ir_ast, classification, &opts, &debug_env)?;
 
     // Extracts the callback functions used in the GPU AST and produces separate ASTs for these.
     // The result consists of three parts:

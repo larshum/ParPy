@@ -1,6 +1,6 @@
 use super::ast::*;
-use super::classify_target::TargetClass;
 use super::par_tree;
+use super::target_constraints::TargetConstraint;
 use crate::option;
 use crate::par;
 use crate::parpy_compile_error;
@@ -16,10 +16,12 @@ use crate::utils::substitute::SubVars;
 
 use std::collections::{BTreeMap, BTreeSet};
 
-fn collect_host_functions(mapping: &BTreeMap<Name, TargetClass>) -> BTreeSet<Name> {
+fn collect_host_functions(
+    mapping: &BTreeMap<Name, TargetConstraint>
+) -> BTreeSet<Name> {
     mapping.iter()
         .filter(|(_, cls)| match cls {
-            TargetClass::HostOnly => true,
+            TargetConstraint::HostOnly => true,
             _ => false
         })
         .map(|(id, _)| id.clone())
@@ -1160,7 +1162,7 @@ fn remove_parallelism_of_host_loop_nests(
 /// transforming the AST. These are performed to restore the AST to a valid state.
 pub fn restructure_inter_block_synchronization(
     ast: Ast,
-    target_mapping: &BTreeMap<Name, TargetClass>,
+    mapping: &BTreeMap<Name, TargetConstraint>,
     opts: &option::CompileOptions
 ) -> CompileResult<Ast> {
     // NOTE: We only apply this to the main function definition, which is the last one in the list.
@@ -1168,8 +1170,8 @@ pub fn restructure_inter_block_synchronization(
     let FunDef {id, params, body, res_ty, i} = ast.main;
 
     // We construct a set of the names of all host functions based on the target mapping results.
-    // Functions that have been classified as 'HostOnly' are considered to be host functions.
-    let host_functions = collect_host_functions(&target_mapping);
+    // Host functions are those where the target constraints were identified as 'HostOnly'.
+    let host_functions = collect_host_functions(&mapping);
 
     // Insert a synchronization point at the end of each parallel for-loop, and determine for each
     // of them whether they require inter-block synchronization.

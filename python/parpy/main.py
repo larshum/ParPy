@@ -67,16 +67,10 @@ def _check_kwarg(kwargs, key, expected_ty, fun_name):
     else:
         raise RuntimeError(f"The keyword argument {key} should be of type {ty}")
 
-def _validate_external_type(target, backend, par):
+def _validate_external_type(target, par):
     from .parpy import CompileBackend, Target
-    if backend == CompileBackend.Cuda:
-        if target == Target.Host:
-            raise RuntimeError(f"Host externals are not supported in the CUDA backend")
-    elif backend == CompileBackend.Metal:
-        if target == Target.Host and par.is_parallel():
-            raise RuntimeError(f"Host externals cannot be parallel")
-    else:
-        raise RuntimeError(f"Unsupported external backend: {backend}")
+    if target == Target.Host and par.is_parallel():
+        raise RuntimeError(f"Host externals cannot be parallel")
 
 def _declare_callback(fn, vars):
     ast, info = _parse_function(fn)
@@ -211,7 +205,7 @@ def external(ext_name, backend, target, header=None, parallelize=parpy.LoopPar()
     vars = (globs, locs)
     def external_wrap(fn):
         import functools
-        _validate_external_type(target, backend, parallelize)
+        _validate_external_type(target, parallelize)
         ext_decl = _declare_external(fn, ext_name, target, header, parallelize, vars)
         if not backend in _ext_decls:
             _ext_decls[backend] = {}
