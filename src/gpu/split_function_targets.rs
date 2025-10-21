@@ -167,9 +167,7 @@ pub fn apply(
     ast: Ast,
     classification: BTreeMap<Name, TargetClass>
 ) -> CompileResult<(Ast, BTreeMap<Name, TargetClass>)> {
-    println!("{0:#?}", classification);
     let env = SplitTargetsEnv::new(classification);
-    println!("{0:#?}", env.classification);
     let ast = split_functions_targeting_both(&env, ast)?;
     Ok((ast, env.classification))
 }
