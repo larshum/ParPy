@@ -77,8 +77,8 @@ pub struct ScalarSizes {
 
 fn select_int_size(backend: &CompileBackend) -> ElemSize {
     match backend {
-        CompileBackend::Metal => ElemSize::I32,
-        CompileBackend::Cuda | CompileBackend::Auto => ElemSize::I64,
+        CompileBackend::Metal | CompileBackend::Cuda |
+        CompileBackend::Auto => ElemSize::I32,
     }
 }
 
@@ -164,7 +164,7 @@ mod test {
         let mut opts = CompileOptions::default();
         opts.backend = CompileBackend::Cuda;
         let sz = ScalarSizes::from_opts(&opts);
-        assert_eq!(sz.int, ElemSize::I64);
+        assert_eq!(sz.int, ElemSize::I32);
         assert_eq!(sz.float, ElemSize::F64);
     }
 
