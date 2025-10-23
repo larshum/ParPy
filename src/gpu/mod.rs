@@ -9,6 +9,7 @@ mod pprint;
 mod reduce;
 mod split_function_targets;
 mod sync_elim;
+mod unroll_loops;
 
 #[cfg(test)]
 pub mod ast_builder;
@@ -52,6 +53,11 @@ pub fn from_general_ir(
     debug_env.print("GPU AST after eliminating block-wide memory writes", &ast);
 
     let ast = constant_fold::fold(ast);
+
+    // Unroll simple for-loops that contain a single statement and that do not perform more than a
+    // fixed number of iterations in total, as determined via a compiler option.
+    let ast = unroll_loops::apply(ast, opts);
+    debug_env.print("GPU AST after unrolling for-loops", &ast);
 
     // Eliminate redundant uses of synchronization. This includes repeated uses of synchronization
     // on the same scope and trailing synchronization at the end of a kernel.

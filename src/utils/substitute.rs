@@ -1,3 +1,4 @@
+use crate::gpu::ast as gpu_ast;
 use crate::ir::ast as ir_ast;
 use crate::py::ast as py_ast;
 use crate::utils::name::Name;
@@ -73,5 +74,23 @@ impl SubVars<Name> for ir_ast::Stmt {
     fn sub_vars(self, env: &SubEnv<Name>) -> ir_ast::Stmt {
         let s = self.smap(|s: ir_ast::Stmt| s.sub_vars(env));
         s.smap(|e: ir_ast::Expr| e.sub_vars(env))
+    }
+}
+
+impl SubVars<gpu_ast::Expr> for gpu_ast::Expr {
+    fn sub_vars(self, env: &SubEnv<gpu_ast::Expr>) -> gpu_ast::Expr {
+        match self {
+            gpu_ast::Expr::Var {id, ..} if env.contains_key(&id) => {
+                env.get(&id).unwrap().clone()
+            },
+            _ => self.smap(|e| e.sub_vars(env))
+        }
+    }
+}
+
+impl SubVars<gpu_ast::Expr> for gpu_ast::Stmt {
+    fn sub_vars(self, env: &SubEnv<gpu_ast::Expr>) -> gpu_ast::Stmt {
+        let s = self.smap(|s: gpu_ast::Stmt| s.sub_vars(env));
+        s.smap(|e: gpu_ast::Expr| e.sub_vars(env))
     }
 }
