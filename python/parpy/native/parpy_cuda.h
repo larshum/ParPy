@@ -20,6 +20,6 @@ extern "C" int32_t parpy_memset(void*, int64_t, int8_t);
 extern "C" int32_t parpy_free_buffer(void*);
 
 extern "C" const char *parpy_get_error_message() {
-  cudaError_t err = cudaGetLastError();
+  cudaError_t err = cudaPeekAtLastError();
   return cudaGetErrorString(err);
 }

@@ -258,7 +258,7 @@ impl PrettyPrint for Expr {
                 (env, format!("{e}"))
             },
             Expr::GetLastError {..} => {
-                (env, format!("cudaGetLastError()"))
+                (env, format!("cudaPeekAtLastError()"))
             },
             Expr::FuncSetAttribute {func, attr, value, ..} => {
                 let (env, func) = func.pprint(env);
