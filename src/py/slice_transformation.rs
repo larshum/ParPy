@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::constant_fold;
 use crate::py_internal_error;
 use crate::py_runtime_error;
 use crate::py_type_error;
@@ -394,6 +395,9 @@ fn replace_slices_assignment(
     scalar_sizes: &ScalarSizes,
     is_definition: bool
 ) -> PyResult<Stmt> {
+    let lhs = constant_fold::fold_expr(lhs);
+    let rhs = constant_fold::fold_expr(rhs);
+
     // If neither side of the assignment contains a slice, we reconstruct the original statement.
     // Otherwise, it is a slice statement, which is processed differently depending on whether it
     // performs a reduction or not.
