@@ -439,7 +439,6 @@ class MetalBuffer(Buffer):
         ptr, _, _ = _check_array_interface(a.__array_interface__)
         self.sync()
         lib = self._get_runtime_lib()
-        print(f"copying data to numpy array from {self.buf} {self.shape} {self.dtype} {self.buf_offset} {self.buf_wrap}")
         _check_errors(lib, lib.parpy_memcpy(ptr, self.buf_wrap, self.size(), 2))
         return a.reshape(self.shape)
 
