@@ -52,6 +52,12 @@ pub struct CompileOptions {
     #[pyo3(get, set)]
     pub backend: CompileBackend,
 
+    // Determines the maximum number of iterations of a for-loop that the compiler will unroll.
+    // This bound is used to avoid excessive compilation times when the workload per thread is
+    // huge.
+    #[pyo3(get, set)]
+    pub max_unroll_count: i64,
+
     // When this option is enabled, the compiler will opt to use thread block clusters in place of
     // inter-block synchronization where applicable. This is only available on the CUDA backend.
     #[pyo3(get, set)]
@@ -106,6 +112,7 @@ impl Default for CompileOptions {
             debug_callbacks: false,
             write_output: false,
             backend: CompileBackend::Auto,
+            max_unroll_count: 32,
             use_cuda_thread_block_clusters: false,
             max_thread_blocks_per_cluster: 8,
             use_cuda_graphs: false,

@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::constant_fold;
 use crate::py_internal_error;
 use crate::py_runtime_error;
 use crate::py_type_error;
@@ -250,10 +251,17 @@ fn derive_dims_from_reduce_id(
     let reduce_var = Expr::Var {
         id: reduce_id.clone(), ty: e.get_type().clone(), i: e.get_info()
     };
-    let sub_map = derive_dims_from_reduce_id_helper(
-        BTreeMap::new(), &dims[..], &reduce_var, &scalar_sizes
-    );
-    e.sub_vars(&sub_map)
+    if dims.len() == 1 {
+        let (_, id) = &dims[0];
+        let mut sub_map = BTreeMap::new();
+        sub_map.insert(id.clone(), reduce_var);
+        e.sub_vars(&sub_map)
+    } else {
+        let sub_map = derive_dims_from_reduce_id_helper(
+            BTreeMap::new(), &dims[..], &reduce_var, &scalar_sizes
+        );
+        e.sub_vars(&sub_map)
+    }
 }
 
 enum ReduceTargetType {
@@ -387,6 +395,9 @@ fn replace_slices_assignment(
     scalar_sizes: &ScalarSizes,
     is_definition: bool
 ) -> PyResult<Stmt> {
+    let lhs = constant_fold::fold_expr(lhs);
+    let rhs = constant_fold::fold_expr(rhs);
+
     // If neither side of the assignment contains a slice, we reconstruct the original statement.
     // Otherwise, it is a slice statement, which is processed differently depending on whether it
     // performs a reduction or not.
