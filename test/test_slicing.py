@@ -158,3 +158,16 @@ def test_run_slicing(spec, backend):
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_compile_slicing(spec, backend):
     run_if_backend_is_enabled(backend, lambda: run_slicing_test(True, spec, backend))
+
+@parpy.jit
+def negative_index_kernel(x):
+    parpy.label('N')
+    x[-1,:] = 0.0
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_negative_index_in_slice(backend):
+    def helper():
+        x = torch.ones(10, 8, dtype=torch.float32)
+        negative_index_kernel(x, opts=par_opts(backend, {'N': parpy.threads(32)}))
+        assert torch.allclose(x[-1,:], torch.zeros(8, dtype=torch.float32))
+    run_if_backend_is_enabled(backend, helper)

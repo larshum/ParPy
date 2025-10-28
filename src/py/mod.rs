@@ -1,3 +1,4 @@
+mod adjust_negative_indices;
 pub mod ast;
 mod constant_fold;
 mod eliminate_duplicate_functions;
@@ -86,6 +87,10 @@ pub fn specialize_ast_on_arguments<'py>(
     let ast = type_check::apply(main, &args, tops, &opts)?;
     let ast = eliminate_duplicate_functions::apply(ast)?;
     debug_env.print("Python-like AST after type-checking", &ast);
+
+    // Adjusts indexing using negative literals to properly offset it with respect to the size of
+    // the corresponding dimension, to achieve a similar behavior as in Python.
+    let ast = adjust_negative_indices::apply(ast)?;
 
     // Inline the values of any scalar arguments provided to the main function. This may
     // significantly improve performance as it provides additional information to the underlying
