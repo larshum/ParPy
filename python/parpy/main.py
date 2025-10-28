@@ -92,18 +92,14 @@ def _check_kwargs(kwargs, fun_name):
 
     return opts
 
-def _compile_function(ir_ast, args, vars, opts):
+def _compile_function(qualified_name, ir_ast, args, vars, opts):
     from .compile import build_shared_library, get_wrapper
     from .key import _generate_fast_cache_key, _generate_function_key
 
-    # Extract the name of the main function in the IR AST.
-    name = parpy.get_function_name(ir_ast)
-
-    # Generate a key based on the IR AST, the function arguments, and the
-    # compile options. If this key is found in the cache, we have already
-    # compiled the function in this way before, so we return the cached wrapper
-    # function.
-    fast_cache_key = _generate_fast_cache_key(ir_ast, args, opts)
+    # Quickly generate a key based on the qualified name of the function, the
+    # arguments passed to it, and the compilation options. If the key is found
+    # in the cache, it was already compiled using the same specialization.
+    fast_cache_key = _generate_fast_cache_key(qualified_name, args, opts)
     if fast_cache_key in _fun_cache:
         return _fun_cache[fast_cache_key]
 
@@ -116,6 +112,9 @@ def _compile_function(ir_ast, args, vars, opts):
     # we run the underlying compiler to produce a shared library.
     cache_key = _generate_function_key(unsymb_code, opts)
     build_shared_library(cache_key, code, opts)
+
+    # Extract the name of the main function in the IR AST.
+    name = parpy.get_function_name(ir_ast)
 
     # Return a wrapper function which ensures the arguments are correctly
     # passed to the exposed shared library function.
@@ -227,12 +226,14 @@ def jit(fun):
     globs = inspect.currentframe().f_back.f_globals
     locs = inspect.currentframe().f_back.f_locals
     vars = (globs, locs)
+    qualified_name = _qualified_name(fun)
     ir_ast = _convert_python_function_to_ir(fun, vars)
 
     @functools.wraps(fun)
     def inner(*args, **kwargs):
         opts = backend._resolve_backend(_check_kwargs(kwargs, fun.__name__), True)
         args = check_arguments(args, opts, True)
-        _compile_function(ir_ast, args, vars, opts)(*args)
+        fn = _compile_function(qualified_name, ir_ast, args, vars, opts)
+        fn(*args)
     _ir_asts[inner] = ir_ast
     return inner

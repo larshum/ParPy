@@ -8,18 +8,18 @@ def _generate_function_key(code, opts):
 
 def _print_argument_key(arg):
     from .buffer import Buffer
-    if isinstance(arg, dict):
-        s = []
-        for k, v in sorted(arg.items()):
-            s.append(f"{k}: {_print_argument_key(v)}")
-        return """{{{", ".join(s)}}}"""
-    elif isinstance(arg, Buffer):
+    if isinstance(arg, Buffer):
         if len(arg.shape) == 0:
             v = arg.numpy()
             return f"{v};{v.dtype}"
         else:
             shape_strs = [f"{s}" for s in arg.shape]
             return f"""[{",".join(shape_strs)};{arg.dtype}]"""
+    elif isinstance(arg, dict):
+        s = []
+        for k, v in sorted(arg.items()):
+            s.append(f"{k}: {_print_argument_key(v)}")
+        return """{{{", ".join(s)}}}"""
     else:
         return f"{arg}"
 
@@ -29,9 +29,8 @@ def _print_arguments_key(args):
 def _print_compile_options_key(opts):
     return str(opts)
 
-def _generate_fast_cache_key(ir_ast, args, opts):
-    from .parpy import print_ast
-    ir_key = print_ast(ir_ast)
+def _generate_fast_cache_key(qualified_name, args, opts):
+    import time
     args_key = _print_arguments_key(args)
     opts_key = _print_compile_options_key(opts)
-    return f"{ir_key}+{args_key}+{opts_key}"
+    return f"{qualified_name}+{args_key}+{opts_key}"

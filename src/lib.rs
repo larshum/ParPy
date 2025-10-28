@@ -63,14 +63,6 @@ fn declare_external<'py>(
 }
 
 #[pyfunction]
-fn print_ast<'py>(cap: Bound<'py, PyCapsule>) -> String {
-    let untyped_def: &py::ast::Top = unsafe {
-        cap.reference()
-    };
-    untyped_def.pprint_default()
-}
-
-#[pyfunction]
 fn get_function_name<'py>(cap: Bound<'py, PyCapsule>) -> String {
     let untyped_def: &py::ast::Top = unsafe {
         cap.reference()
@@ -164,7 +156,6 @@ fn parpy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(python_to_ir, m)?)?;
     m.add_function(wrap_pyfunction!(declare_callback, m)?)?;
     m.add_function(wrap_pyfunction!(declare_external, m)?)?;
-    m.add_function(wrap_pyfunction!(print_ast, m)?)?;
     m.add_function(wrap_pyfunction!(get_function_name, m)?)?;
     m.add_function(wrap_pyfunction!(compile_ir, m)?)?;
     m.add_function(wrap_pyfunction!(option::par, m)?)?;
