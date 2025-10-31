@@ -4,12 +4,14 @@ use crate::utils::info::*;
 use crate::utils::name::Name;
 use crate::utils::smap::*;
 
+use std::cmp::Ordering;
+
 pub use crate::utils::ast::ElemSize;
 pub use crate::utils::ast::UnOp;
 pub use crate::utils::ast::BinOp;
 pub use crate::utils::ast::Target;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MemSpace {
     // Memory allocated on the host (CPU)
     Host,
@@ -18,7 +20,7 @@ pub enum MemSpace {
     Device,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dim {
     X, Y, Z
 }
@@ -67,6 +69,28 @@ pub enum Expr {
     // either of the three dimensions.
     ThreadIdx {dim: Dim, ty: Type, i: Info},
     BlockIdx {dim: Dim, ty: Type, i: Info},
+}
+
+impl Expr {
+    fn discriminator(&self) -> u8 {
+        match self {
+            Expr::Var {..} => 0,
+            Expr::Bool {..} => 1,
+            Expr::Int {..} => 2,
+            Expr::Float {..} => 3,
+            Expr::UnOp {..} => 4,
+            Expr::BinOp {..} => 5,
+            Expr::IfExpr {..} => 6,
+            Expr::StructFieldAccess {..} => 7,
+            Expr::ArrayAccess {..} => 8,
+            Expr::Call {..} => 9,
+            Expr::PyCallback {..} => 10,
+            Expr::Convert {..} => 11,
+            Expr::Struct {..} => 12,
+            Expr::ThreadIdx {..} => 13,
+            Expr::BlockIdx {..} => 14,
+        }
+    }
 }
 
 impl ExprType<Type> for Expr {
@@ -122,44 +146,64 @@ impl InfoNode for Expr {
     }
 }
 
-impl PartialEq for Expr {
-    fn eq(&self, other: &Expr) -> bool {
+impl Ord for Expr {
+    fn cmp(&self, other: &Expr) -> Ordering {
         match (self, other) {
-            (Expr::Var {id: lid, ..}, Expr::Var {id: rid, ..}) => lid.eq(rid),
-            (Expr::Bool {v: lv, ..}, Expr::Bool {v: rv, ..}) => lv.eq(rv),
-            (Expr::Int {v: lv, ..}, Expr::Int {v: rv, ..}) => lv.eq(rv),
-            (Expr::Float {v: lv, ..}, Expr::Float {v: rv, ..}) => lv.eq(rv),
+            (Expr::Var {id: lid, ..}, Expr::Var {id: rid, ..}) => lid.cmp(rid),
+            (Expr::Bool {v: lv, ..}, Expr::Bool {v: rv, ..}) => lv.cmp(rv),
+            (Expr::Int {v: lv, ..}, Expr::Int {v: rv, ..}) => lv.cmp(rv),
+            (Expr::Float {v: lv, ..}, Expr::Float {v: rv, ..}) => f64::total_cmp(lv, rv),
             ( Expr::UnOp {op: lop, arg: larg, ..}
             , Expr::UnOp {op: rop, arg: rarg, ..} ) =>
-                lop.eq(rop) && larg.eq(rarg),
+                lop.cmp(rop).then(larg.cmp(rarg)),
             ( Expr::BinOp {lhs: llhs, op: lop, rhs: lrhs, ..}
-            , Expr::BinOp {lhs: rlhs, op: rop, rhs: rrhs, ..} ) =>
-                llhs.eq(rlhs) && lop.eq(rop) && lrhs.eq(rrhs),
+            , Expr::BinOp {lhs: rlhs, op: rop, rhs: rrhs, ..} ) => {
+                llhs.cmp(rlhs)
+                    .then(lop.cmp(rop))
+                    .then(lrhs.cmp(rrhs))
+            },
             ( Expr::IfExpr {cond: lcond, thn: lthn, els: lels, ..}
-            , Expr::IfExpr {cond: rcond, thn: rthn, els: rels, ..} ) =>
-                lcond.eq(rcond) && lthn.eq(rthn) && lels.eq(rels),
+            , Expr::IfExpr {cond: rcond, thn: rthn, els: rels, ..} ) => {
+                lcond.cmp(rcond)
+                    .then(lthn.cmp(rthn))
+                    .then(lels.cmp(rels))
+            },
             ( Expr::StructFieldAccess {target: ltarget, label: llabel, ..}
             , Expr::StructFieldAccess {target: rtarget, label: rlabel, ..} ) =>
-                ltarget.eq(rtarget) && llabel.eq(rlabel),
+                ltarget.cmp(rtarget).then(llabel.cmp(rlabel)),
             ( Expr::ArrayAccess {target: ltarget, idx: lidx, ..}
             , Expr::ArrayAccess {target: rtarget, idx: ridx, ..} ) =>
-                ltarget.eq(rtarget) && lidx.eq(ridx),
+                ltarget.cmp(rtarget).then(lidx.cmp(ridx)),
             ( Expr::Call {id: lid, args: largs, ..}
             , Expr::Call {id: rid, args: rargs, ..} ) =>
-                lid.eq(rid) && largs.eq(rargs),
+                lid.cmp(rid).then(largs.cmp(rargs)),
             ( Expr::PyCallback {id: lid, args: largs, ..}
             , Expr::PyCallback {id: rid, args: rargs, ..} ) =>
-                lid.eq(rid) && largs.eq(rargs),
-            (Expr::Convert {e: le, ..}, Expr::Convert {e: re, ..}) => le.eq(re),
+                lid.cmp(rid).then(largs.cmp(rargs)),
+            (Expr::Convert {e: le, ..}, Expr::Convert {e: re, ..}) => le.cmp(re),
             ( Expr::Struct {id: lid, fields: lfields, ..}
             , Expr::Struct {id: rid, fields: rfields, ..} ) =>
-                lid.eq(rid) && lfields.eq(rfields),
+                lid.cmp(rid).then(lfields.cmp(rfields)),
             (Expr::ThreadIdx {dim: ldim, ..}, Expr::ThreadIdx {dim: rdim, ..}) =>
-                ldim.eq(rdim),
+                ldim.cmp(rdim),
             (Expr::BlockIdx {dim: ldim, ..}, Expr::BlockIdx {dim: rdim, ..}) =>
-                ldim.eq(rdim),
-            (_, _) => false
+                ldim.cmp(rdim),
+            (lhs, rhs) => lhs.discriminator().cmp(&rhs.discriminator())
         }
+    }
+}
+
+impl PartialEq for Expr {
+    fn eq(&self, other: &Expr) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for Expr {}
+
+impl PartialOrd for Expr {
+    fn partial_cmp(&self, other: &Expr) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
