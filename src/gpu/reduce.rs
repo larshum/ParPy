@@ -101,38 +101,43 @@ pub fn extract_reduction_operands(
     // The reduction loop body must contain a single statement.
     if body.len() == 1 {
         // The single statement must be a single (re)assignment.
-        if let Stmt::Assign {dst, expr, ..} = body.remove(0) {
-            // The right-hand side should be a binary operation, so we extract its constituents.
-            let (lhs, op, rhs, sz, i) = extract_bin_op(expr)?;
-            // The destination of the assignment must either be a variable or an access.
-            match dst {
-                Expr::Var {..} | Expr::ArrayAccess {..} => {
-                    // The assignment destination must be equal to the left-hand side of the
-                    // reduction operation.
-                    if dst == unwrap_convert(&lhs) {
-                        Ok((dst, op, rhs, sz, i))
-                    } else {
-                        let msg = format!(
-                            "Invalid reduction. Left-hand side of binary \
-                             operation {0} is not equal to the assignment \
-                             target {1}.",
-                             lhs.pprint_default(), dst.pprint_default()
-                        );
-                        parpy_compile_error!(i, "{}", msg)
+        if let Stmt::Expr {e, ..} = body.remove(0) {
+            if let Expr::Assign {lhs: dst, rhs: expr, ..} = e {
+                // The right-hand side should be a binary operation, so we extract its constituents.
+                let (lhs, op, rhs, sz, i) = extract_bin_op(*expr)?;
+                // The destination of the assignment must either be a variable or an access.
+                match *dst {
+                    Expr::Var {..} | Expr::ArrayAccess {..} => {
+                        // The assignment destination must be equal to the left-hand side of the
+                        // reduction operation.
+                        if *dst == unwrap_convert(&lhs) {
+                            Ok((*dst, op, rhs, sz, i))
+                        } else {
+                            let msg = format!(
+                                "Invalid reduction. Left-hand side of binary \
+                                 operation {0} is not equal to the assignment \
+                                 target {1}.",
+                                 lhs.pprint_default(), dst.pprint_default()
+                            );
+                            parpy_compile_error!(i, "{}", msg)
+                        }
+                    },
+                    _ => {
+                        parpy_compile_error!(i, "Left-hand side of reduction must \
+                                                 be a variable or tensor access.")
                     }
-                },
-                _ => {
-                    parpy_compile_error!(i, "Left-hand side of reduction must \
-                                               be a variable or tensor access.")
                 }
+            } else {
+                parpy_compile_error!(i, "Reduction for-loop statement must be \
+                                         an assignment.")
             }
         } else {
             parpy_compile_error!(i, "Reduction for-loop statement must be an \
-                                       assignment.")
+                                     assignment.")
         }
     } else {
         parpy_compile_error!(i, "Reduction for-loop must contain a single \
-                                   statement.")
+                                 statement.")
     }
 }
 
@@ -179,12 +184,16 @@ fn generate_main_reduction_loop(env: &ReduceEnv, acc: &mut Vec<Stmt>) {
         expr: env.for_loop.ne.clone(),
         i: env.i.clone()
     });
-    let temp_assign = Stmt::Assign {
-        dst: env.temp_var.clone(),
-        expr: Expr::BinOp {
+    let temp_assign = Stmt::Expr {
+        e: Expr::Assign {
             lhs: Box::new(env.temp_var.clone()),
-            op: env.for_loop.op.clone(),
-            rhs: Box::new(env.for_loop.rhs.clone()),
+            rhs: Box::new(Expr::BinOp {
+                lhs: Box::new(env.temp_var.clone()),
+                op: env.for_loop.op.clone(),
+                rhs: Box::new(env.for_loop.rhs.clone()),
+                ty: env.res_ty.clone(),
+                i: env.i.clone()
+            }),
             ty: env.res_ty.clone(),
             i: env.i.clone()
         },
@@ -231,14 +240,18 @@ fn generate_shared_memory_zero_initialized(env: &ReduceEnv, acc: &mut Vec<Stmt>)
     };
     acc.push(Stmt::If {
         cond: is_first_warp,
-        thn: vec![Stmt::Assign {
-            dst: Expr::ArrayAccess {
-                target: Box::new(shared_var.clone()),
-                idx: Box::new(Expr::ThreadIdx {dim: Dim::X, ty: int_ty.clone(), i: i.clone()}),
+        thn: vec![Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(Expr::ArrayAccess {
+                    target: Box::new(shared_var.clone()),
+                    idx: Box::new(Expr::ThreadIdx {dim: Dim::X, ty: int_ty.clone(), i: i.clone()}),
+                    ty: env.res_ty.clone(),
+                    i: i.clone()
+                }),
+                rhs: Box::new(env.for_loop.ne.clone()),
                 ty: env.res_ty.clone(),
                 i: i.clone()
             },
-            expr: env.for_loop.ne.clone(),
             i: i.clone()
         }],
         els: vec![],
@@ -271,25 +284,33 @@ fn generate_shared_memory_exchange(
     };
     acc.push(Stmt::If {
         cond: is_first_thread_of_warp,
-        thn: vec![Stmt::Assign {
-            dst: Expr::ArrayAccess {
-                target: Box::new(shared_var.clone()),
-                idx: Box::new(warp_op(BinOp::Div)),
+        thn: vec![Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(Expr::ArrayAccess {
+                    target: Box::new(shared_var.clone()),
+                    idx: Box::new(warp_op(BinOp::Div)),
+                    ty: env.res_ty.clone(),
+                    i: i.clone()
+                }),
+                rhs: Box::new(env.temp_var.clone()),
                 ty: env.res_ty.clone(),
                 i: i.clone()
             },
-            expr: env.temp_var.clone(),
             i: i.clone()
         }],
         els: vec![],
         i: i.clone()
     });
     acc.push(Stmt::Synchronize {scope: SyncScope::Block, i: env.i.clone()});
-    acc.push(Stmt::Assign {
-        dst: env.temp_var.clone(),
-        expr: Expr::ArrayAccess {
-            target: Box::new(shared_var.clone()),
-            idx: Box::new(warp_op(BinOp::Rem)),
+    acc.push(Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(env.temp_var.clone()),
+            rhs: Box::new(Expr::ArrayAccess {
+                target: Box::new(shared_var.clone()),
+                idx: Box::new(warp_op(BinOp::Rem)),
+                ty: env.res_ty.clone(),
+                i: i.clone()
+            }),
             ty: env.res_ty.clone(),
             i: i.clone()
         },
@@ -341,14 +362,18 @@ fn generate_reduction_write_result(
     scope: ReductionScope,
     acc: &mut Vec<Stmt>
 ) {
-    let write_result = Stmt::Assign {
-        dst: env.for_loop.lhs.clone(),
-        expr: Expr::BinOp {
+    let write_result = Stmt::Expr {
+        e: Expr::Assign {
             lhs: Box::new(env.for_loop.lhs.clone()),
-            op: env.for_loop.op.clone(),
-            rhs: Box::new(env.temp_var.clone()),
+            rhs: Box::new(Expr::BinOp {
+                lhs: Box::new(env.for_loop.lhs.clone()),
+                op: env.for_loop.op.clone(),
+                rhs: Box::new(env.temp_var.clone()),
+                ty: env.res_ty.clone(),
+                i: env.i.clone()
+            }),
             ty: env.res_ty.clone(),
-            i: env.i.clone()
+            i: env.i.clone(),
         },
         i: env.i.clone()
     };

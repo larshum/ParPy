@@ -62,9 +62,14 @@ fn find_thread_index_dependent_variables_stmt(
             acc.insert(id.clone());
             Ok(acc)
         },
-        Stmt::Assign {dst, expr, ..} if thread_index_dependent_expr(&acc, expr) => {
-            let target_id = extract_assign_target_id(dst)?;
-            acc.insert(target_id);
+        Stmt::Expr {e, ..} => {
+            match e {
+                Expr::Assign {lhs, rhs, ..} if thread_index_dependent_expr(&acc, rhs) => {
+                    let target_id = extract_assign_target_id(lhs)?;
+                    acc.insert(target_id);
+                },
+                _ => ()
+            };
             Ok(acc)
         },
         Stmt::For {var, init, body, ..} => {
@@ -73,11 +78,11 @@ fn find_thread_index_dependent_variables_stmt(
             }
             body.sfold(Ok(acc), find_thread_index_dependent_variables_stmt)
         },
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::While {..} | Stmt::If {..} |
-        Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
-        Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
-        Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
-        Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
+        Stmt::Definition {..} | Stmt::While {..} | Stmt::If {..} | Stmt::Return {..} |
+        Stmt::Scope {..} | Stmt::ParallelReduction {..} | Stmt::Synchronize {..} |
+        Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+        Stmt::AllocDevice {..} | Stmt::AllocShared {..} | Stmt::FreeDevice {..} |
+        Stmt::CopyMemory {..} => {
             stmt.sfold(Ok(acc), find_thread_index_dependent_variables_stmt)
         }
     }
@@ -107,17 +112,24 @@ fn write_temporary_result_on_first_thread_only(
     i: &Info
 ) {
     let temp_id = Name::sym_str("t");
+    let ty = lhs.get_type().clone();
     let temp_var = Expr::Var {
         id: temp_id.clone(),
-        ty: lhs.get_type().clone(),
+        ty: ty.clone(),
         i: lhs.get_info().clone()
     };
     let assign_rhs_to_fresh_temp = Stmt::Definition {
-        ty: lhs.get_type().clone(), id: temp_id, expr: rhs, i: i.clone()
+        ty: ty.clone(), id: temp_id, expr: rhs, i: i.clone()
     };
     acc.push(assign_rhs_to_fresh_temp);
-    let write_to_lhs = Stmt::Assign {
-        dst: lhs, expr: temp_var.clone(), i: i.clone()
+    let write_to_lhs = Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(lhs),
+            rhs: Box::new(temp_var.clone()),
+            ty,
+            i: i.clone()
+        },
+        i: i.clone()
     };
     acc.push(Stmt::If {
         cond: Expr::BinOp {
@@ -142,22 +154,38 @@ fn transform_thread_independent_memory_writes_stmt(
     vars: &BTreeSet<Name>
 ) -> Vec<Stmt> {
     match stmt {
-        Stmt::Assign {dst: ref lhs @ Expr::ArrayAccess {ref idx, ..}, expr, i} => {
-            if thread_index_dependent_expr(&vars, idx.as_ref()) {
-                acc.push(Stmt::Assign {dst: lhs.clone(), expr, i});
+        Stmt::Expr {e: Expr::Assign {lhs, rhs, ty, i}, i: stmt_i} => {
+            if let Expr::ArrayAccess {idx, ..} = lhs.as_ref() {
+                if thread_index_dependent_expr(&vars, idx.as_ref()) {
+                    acc.push(Stmt::Expr {
+                        e: Expr::Assign {
+                            lhs: Box::new(*lhs.clone()),
+                            rhs: Box::new(*rhs),
+                            ty,
+                            i: i.clone()
+                        },
+                        i
+                    });
+                } else {
+                    let int_ty = idx.get_type();
+                    write_temporary_result_on_first_thread_only(
+                        &mut acc, *lhs.clone(), *rhs, int_ty, &i
+                    );
+                }
             } else {
-                let int_ty = idx.get_type();
-                write_temporary_result_on_first_thread_only(
-                    &mut acc, lhs.clone(), expr, int_ty, &i
-                );
-            };
+                acc.push(Stmt::Expr {
+                    e: Expr::Assign {lhs, rhs, ty, i},
+                    i: stmt_i
+                });
+            }
             acc
-        },
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::For {..} | Stmt::If {..} |
-        Stmt::While {..} | Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
-        Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
-        Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
-        Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
+        }
+        Stmt::Definition {..} | Stmt::For {..} | Stmt::If {..} | Stmt::While {..} |
+        Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
+        Stmt::ParallelReduction {..} | Stmt::Synchronize {..} |
+        Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
+        Stmt::AllocDevice {..} | Stmt::AllocShared {..} | Stmt::FreeDevice {..} |
+        Stmt::CopyMemory {..} => {
             stmt.sflatten(acc, |acc, s| {
                 transform_thread_independent_memory_writes_stmt(acc, s, &vars)
             })
@@ -215,7 +243,7 @@ mod test {
         let ptr_ty = pointer(scalar(ElemSize::I32), MemSpace::Device);
         let lhs = array_access(var("x", ptr_ty), int(0, Some(ElemSize::I32)), scalar(ElemSize::I32));
         let rhs = var("y", scalar(ElemSize::I32));
-        let s = Stmt::Assign {dst: lhs.clone(), expr: rhs.clone(), i: i()};
+        let s = assign(lhs.clone(), rhs.clone());
         let r = transform_thread_independent_memory_writes_stmt(vec![], s, &BTreeSet::new());
         if let [a, b, c] = &r[..] {
             if let Stmt::Definition {ty, id, expr, i: _} = a.clone() {
@@ -229,14 +257,13 @@ mod test {
                 let l = Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I32), i: i()};
                 let r = int(0, Some(ElemSize::I32));
                 assert_eq!(cond, binop(l, BinOp::Eq, r, scalar(ElemSize::Bool)));
-                assert!(matches!(
-                    thn[..],
-                    [Stmt::Assign {
-                        dst: Expr::ArrayAccess {..},
-                        expr: Expr::Var {..},
-                        ..
-                    }]
-                ));
+                match &thn[..] {
+                    [Stmt::Expr {e: Expr::Assign {lhs, rhs, ..}, ..}] => {
+                        assert!(matches!(*lhs.clone(), Expr::ArrayAccess {..}));
+                        assert!(matches!(*rhs.clone(), Expr::Var {..}));
+                    },
+                    _ => panic!("Unexpected form of assignment")
+                }
                 assert_eq!(els, vec![]);
             } else {
                 panic!("Unexpected form of conditional statement");

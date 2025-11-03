@@ -53,6 +53,7 @@ pub enum Expr {
     Float {v: f64, ty: Type, i: Info},
     UnOp {op: UnOp, arg: Box<Expr>, ty: Type, i: Info},
     BinOp {lhs: Box<Expr>, op: BinOp, rhs: Box<Expr>, ty: Type, i: Info},
+    Assign {lhs: Box<Expr>, rhs: Box<Expr>, ty: Type, i: Info},
     Ternary {cond: Box<Expr>, thn: Box<Expr>, els: Box<Expr>, ty: Type, i: Info},
     StructFieldAccess {target: Box<Expr>, label: String, ty: Type, i: Info},
     ArrayAccess {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
@@ -95,6 +96,7 @@ impl ExprType<Type> for Expr {
             Expr::Float {ty, ..} => ty,
             Expr::UnOp {ty, ..} => ty,
             Expr::BinOp {ty, ..} => ty,
+            Expr::Assign {ty, ..} => ty,
             Expr::Ternary {ty, ..} => ty,
             Expr::StructFieldAccess {ty, ..} => ty,
             Expr::ArrayAccess {ty, ..} => ty,
@@ -141,6 +143,7 @@ impl InfoNode for Expr {
             Expr::Float {i, ..} => i.clone(),
             Expr::UnOp {i, ..} => i.clone(),
             Expr::BinOp {i, ..} => i.clone(),
+            Expr::Assign {i, ..} => i.clone(),
             Expr::Ternary {i, ..} => i.clone(),
             Expr::StructFieldAccess {i, ..} => i.clone(),
             Expr::ArrayAccess {i, ..} => i.clone(),
@@ -185,6 +188,11 @@ impl SMapAccum<Expr> for Expr {
                 Ok((acc, Expr::BinOp {
                     lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i
                 }))
+            },
+            Expr::Assign {lhs, rhs, ty, i} => {
+                let (acc, lhs) = f(acc?, *lhs)?;
+                let (acc, rhs) = f(acc, *rhs)?;
+                Ok((acc, Expr::Assign {lhs: Box::new(lhs), rhs: Box::new(rhs), ty, i}))
             },
             Expr::Ternary {cond, thn, els, ty, i} => {
                 let (acc, cond) = f(acc?, *cond)?;
@@ -244,6 +252,7 @@ impl SFold<Expr> for Expr {
         match self {
             Expr::UnOp {arg, ..} => f(acc?, arg),
             Expr::BinOp {lhs, rhs, ..} => f(f(acc?, lhs)?, rhs),
+            Expr::Assign {lhs, rhs, ..} => f(f(acc?, lhs)?, rhs),
             Expr::Ternary {cond, thn, els, ..} => f(f(f(acc?, cond)?, thn)?, els),
             Expr::StructFieldAccess {target, ..} => f(acc?, target),
             Expr::ArrayAccess {target, idx, ..} => f(f(acc?, target)?, idx),
@@ -272,7 +281,6 @@ pub enum Stream {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Definition {ty: Type, id: Name, expr: Option<Expr>},
-    Assign {dst: Expr, expr: Expr},
     For {
         var_ty: Type, var: Name, init: Expr, cond: Expr,
         incr: Expr, body: Vec<Stmt>
@@ -304,11 +312,6 @@ impl SMapAccum<Expr> for Stmt {
                     Ok((acc, Stmt::Definition {ty, id, expr: Some(e)}))
                 },
                 None => Ok((acc?, Stmt::Definition {ty, id, expr}))
-            },
-            Stmt::Assign {dst, expr} => {
-                let (acc, dst) = f(acc?, dst)?;
-                let (acc, expr) = f(acc, expr)?;
-                Ok((acc, Stmt::Assign {dst, expr}))
             },
             Stmt::For {var_ty, var, init, cond, incr, body} => {
                 let (acc, init) = f(acc?, init)?;
@@ -356,7 +359,6 @@ impl SFold<Expr> for Stmt {
                 Some(e) => f(acc?, e),
                 None => acc
             },
-            Stmt::Assign {dst, expr} => f(f(acc?, dst)?, expr),
             Stmt::For {init, cond, incr, ..} => f(f(f(acc?, init)?, cond)?, incr),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::While {cond, ..} => f(acc?, cond),
@@ -389,8 +391,8 @@ impl SMapAccum<Stmt> for Stmt {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::While {cond, body}))
             },
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Expr {..} | Stmt::AllocShared {..} | Stmt::Synchronize {..} |
+            Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
+            Stmt::AllocShared {..} | Stmt::Synchronize {..} |
             Stmt::KernelLaunch {..} | Stmt::CheckError {..} => Ok((acc?, self))
         }
     }
@@ -406,8 +408,8 @@ impl SFold<Stmt> for Stmt {
             Stmt::For {body, ..} => body.sfold_result(acc, &f),
             Stmt::If {thn, els, ..} => els.sfold_result(thn.sfold_result(acc, &f), &f),
             Stmt::While {body, ..} => body.sfold_result(acc, &f),
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
-            Stmt::Expr {..} | Stmt::AllocShared {..} | Stmt::Synchronize {..} |
+            Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
+            Stmt::AllocShared {..} | Stmt::Synchronize {..} |
             Stmt::KernelLaunch {..} | Stmt::CheckError {..} => acc
         }
     }
@@ -433,7 +435,7 @@ impl SFlatten<Stmt> for Stmt {
                 let body = body.sflatten_result(vec![], &f)?;
                 acc.push(Stmt::While {cond, body});
             },
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
+            Stmt::Definition {..} | Stmt::Return {..} |
             Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocShared {..} | Stmt::CheckError {..} => {
                 acc.push(self);

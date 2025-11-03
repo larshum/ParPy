@@ -78,13 +78,17 @@ fn generate_post_kernel_body_statements(env: &GraphEnv, acc: &mut Vec<Stmt>) {
                 ty: Type::GraphExec, i: Info::default()
             })
         },
-        Stmt::Assign {
-            dst: inst_var.clone(),
-            expr: Expr::Bool {
-                v: true,
+        Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(inst_var.clone()),
+                rhs: Box::new(Expr::Bool {
+                    v: true,
+                    ty: Type::Scalar {sz: ElemSize::Bool},
+                    i: Info::default()
+                }),
                 ty: Type::Scalar {sz: ElemSize::Bool},
                 i: Info::default()
-            }
+            },
         }
     ];
 

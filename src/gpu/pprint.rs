@@ -190,6 +190,11 @@ impl PrettyPrint for Expr {
             Expr::Float {v, ..} => print_float(env, v, "inf"),
             Expr::UnOp {..} => self.print_parenthesized_unop(env),
             Expr::BinOp {..} => self.print_parenthesized_binop(env),
+            Expr::Assign {lhs, rhs, ..} => {
+                let (env, lhs) = lhs.pprint(env);
+                let (env, rhs) = rhs.pprint(env);
+                (env, format!("{lhs} = {rhs}"))
+            },
             Expr::IfExpr {cond, thn, els, ..} => {
                 let (env, cond) = cond.pprint(env);
                 let (env, thn) = thn.pprint(env);
@@ -309,11 +314,6 @@ impl PrettyPrint for Stmt {
                 let (env, s) = pprint_type(id, ty, env);
                 let (env, expr) = expr.pprint(env);
                 (env, format!("{indent}{s} = {expr};"))
-            },
-            Stmt::Assign {dst, expr, ..} => {
-                let (env, dst) = dst.pprint(env);
-                let (env, expr) = expr.pprint(env);
-                (env, format!("{indent}{dst} = {expr};"))
             },
             Stmt::For {var_ty, var, init, cond, incr, body, ..} => {
                 let (env, var_ty) = var_ty.pprint(env);
@@ -645,7 +645,7 @@ mod test {
             init: int(0, None),
             cond: binop(i_var.clone(), BinOp::Lt, int(10, None), scalar(ElemSize::Bool)),
             incr: binop(i_var.clone(), BinOp::Add, int(1, None), scalar(ElemSize::I64)),
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            body: vec![assign(uvar("x"), uvar("y"))],
             i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -665,8 +665,8 @@ mod test {
                 ty: Type::Scalar {sz: ElemSize::Bool},
                 i: i()
             },
-            thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
-            els: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("x"), i: i()}],
+            thn: vec![assign(uvar("x"), uvar("y"))],
+            els: vec![assign(uvar("y"), uvar("x"))],
             i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -686,7 +686,7 @@ mod test {
                 ty: Type::Scalar {sz: ElemSize::Bool},
                 i: i()
             },
-            thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            thn: vec![assign(uvar("x"), uvar("y"))],
             els: vec![],
             i: i()
         };
@@ -699,11 +699,11 @@ mod test {
     fn pprint_if_cond_elseif() {
         let cond = Stmt::If {
             cond: uvar("x"),
-            thn: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("z"), i: i()}],
+            thn: vec![assign(uvar("y"), uvar("z"))],
             els: vec![Stmt::If {
                     cond: uvar("y"),
-                    thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("z"), i: i()}],
-                    els: vec![Stmt::Assign {dst: uvar("z"), expr: uvar("x"), i: i()}],
+                    thn: vec![assign(uvar("x"), uvar("z"))],
+                    els: vec![assign(uvar("z"), uvar("x"))],
                     i: i()
             }],
             i: i()
@@ -720,7 +720,7 @@ mod test {
     fn pprint_while() {
         let wh = Stmt::While {
             cond: uvar("x"),
-            body: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("z"), i: i()}],
+            body: vec![assign(uvar("y"), uvar("z"))],
             i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -765,7 +765,7 @@ mod test {
             attrs: vec![KernelAttribute::LaunchBounds {threads: 1024}],
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            body: vec![assign(uvar("x"), uvar("y"))],
             i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -779,7 +779,7 @@ mod test {
             ret_ty: Type::Void,
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            body: vec![assign(uvar("x"), uvar("y"))],
             target: Target::Host,
             i: i()
         };
@@ -794,7 +794,7 @@ mod test {
             ret_ty: Type::Void,
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y"), i: i()}],
+            body: vec![assign(uvar("x"), uvar("y"))],
             target: Target::Device,
             i: i()
         };

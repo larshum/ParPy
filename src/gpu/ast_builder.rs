@@ -1,4 +1,5 @@
 use super::ast::*;
+use crate::utils::ast::ExprType;
 use crate::utils::info::Info;
 use crate::utils::name::Name;
 
@@ -61,7 +62,16 @@ pub fn array_access(target: Expr, idx: Expr, ty: Type) -> Expr {
 }
 
 pub fn assign(dst: Expr, expr: Expr) -> Stmt {
-    Stmt::Assign {dst, expr, i: Info::default()}
+    let ty = expr.get_type().clone();
+    Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(dst),
+            rhs: Box::new(expr),
+            ty,
+            i: Info::default()
+        },
+        i: Info::default()
+    }
 }
 
 pub fn if_stmt(cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>) -> Stmt {

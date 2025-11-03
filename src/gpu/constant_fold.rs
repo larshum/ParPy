@@ -86,7 +86,7 @@ fn fold_expr(e: Expr) -> Expr {
             }
         },
         Expr::Var {..} | Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
-        Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
+        Expr::Assign {..} | Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
         Expr::ArrayAccess {..} | Expr::Call {..} | Expr::PyCallback {..} |
         Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
             e.smap(fold_expr)
@@ -196,7 +196,7 @@ fn fold_stmt_acc(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
             acc
         },
         Stmt::Scope {body, ..} => body.sfold_owned(acc, fold_stmt_acc),
-        Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} | Stmt::Expr {..} |
+        Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
         Stmt::ParallelReduction {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
         Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
         Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {

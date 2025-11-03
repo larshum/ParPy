@@ -291,7 +291,16 @@ fn generate_kernel_stmt(
         ir_ast::Stmt::Assign {dst, expr, i} => {
             let dst = from_ir_expr(dst)?;
             let expr = from_ir_expr(expr)?;
-            acc.push(Stmt::Assign {dst, expr, i});
+            let ty = expr.get_type().clone();
+            acc.push(Stmt::Expr {
+                e: Expr::Assign {
+                    lhs: Box::new(dst),
+                    rhs: Box::new(expr),
+                    ty,
+                    i: i.clone()
+                },
+                i
+            });
         },
         ir_ast::Stmt::SyncPoint {kind, i} => {
             let scope = generate_sync_scope(kind, &i)?;
@@ -393,7 +402,16 @@ fn from_ir_stmt(
         ir_ast::Stmt::Assign {dst, expr, i} => {
             let dst = from_ir_expr(dst)?;
             let expr = from_ir_expr(expr)?;
-            host_body.push(Stmt::Assign {dst, expr, i});
+            let ty = expr.get_type().clone();
+            host_body.push(Stmt::Expr {
+                e: Expr::Assign {
+                    lhs: Box::new(dst),
+                    rhs: Box::new(expr),
+                    ty,
+                    i: i.clone()
+                },
+                i
+            });
             Ok(kernels)
         },
         ir_ast::Stmt::SyncPoint {i, ..} => {

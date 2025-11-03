@@ -173,6 +173,11 @@ impl PrettyPrint for Expr {
             },
             Expr::UnOp {..} => self.print_parenthesized_unop(env),
             Expr::BinOp {..} => self.print_parenthesized_binop(env),
+            Expr::Assign {lhs, rhs, ..} => {
+                let (env, lhs) = lhs.pprint(env);
+                let (env, rhs) = rhs.pprint(env);
+                (env, format!("({lhs} = {rhs})"))
+            },
             Expr::Ternary {cond, thn, els, ..} => {
                 let (env, cond) = cond.pprint(env);
                 let (env, thn) = thn.pprint(env);
@@ -285,11 +290,6 @@ impl PrettyPrint for Stmt {
                 let (env, s) = pprint_type(id, ty, env);
                 let (env, expr) = expr.pprint(env);
                 (env, format!("{indent}{s} = {expr};"))
-            },
-            Stmt::Assign {dst, expr} => {
-                let (env, dst) = dst.pprint(env);
-                let (env, expr) = expr.pprint(env);
-                (env, format!("{indent}{dst} = {expr};"))
             },
             Stmt::For {var_ty, var, init, cond, incr, body} => {
                 let (env, var_ty) = var_ty.pprint(env);

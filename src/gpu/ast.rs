@@ -55,6 +55,7 @@ pub enum Expr {
     Float {v: f64, ty: Type, i: Info},
     UnOp {op: UnOp, arg: Box<Expr>, ty: Type, i: Info},
     BinOp {lhs: Box<Expr>, op: BinOp, rhs: Box<Expr>, ty: Type, i: Info},
+    Assign {lhs: Box<Expr>, rhs: Box<Expr>, ty: Type, i: Info},
     IfExpr {cond: Box<Expr>, thn: Box<Expr>, els: Box<Expr>, ty: Type, i: Info},
     StructFieldAccess {target: Box<Expr>, label: String, ty: Type, i: Info},
     ArrayAccess {target: Box<Expr>, idx: Box<Expr>, ty: Type, i: Info},
@@ -80,15 +81,16 @@ impl Expr {
             Expr::Float {..} => 3,
             Expr::UnOp {..} => 4,
             Expr::BinOp {..} => 5,
-            Expr::IfExpr {..} => 6,
-            Expr::StructFieldAccess {..} => 7,
-            Expr::ArrayAccess {..} => 8,
-            Expr::Call {..} => 9,
-            Expr::PyCallback {..} => 10,
-            Expr::Convert {..} => 11,
-            Expr::Struct {..} => 12,
-            Expr::ThreadIdx {..} => 13,
-            Expr::BlockIdx {..} => 14,
+            Expr::Assign {..} => 6,
+            Expr::IfExpr {..} => 7,
+            Expr::StructFieldAccess {..} => 8,
+            Expr::ArrayAccess {..} => 9,
+            Expr::Call {..} => 10,
+            Expr::PyCallback {..} => 11,
+            Expr::Convert {..} => 12,
+            Expr::Struct {..} => 13,
+            Expr::ThreadIdx {..} => 14,
+            Expr::BlockIdx {..} => 15,
         }
     }
 }
@@ -102,6 +104,7 @@ impl ExprType<Type> for Expr {
             Expr::Float {ty, ..} => ty,
             Expr::UnOp {ty, ..} => ty,
             Expr::BinOp {ty, ..} => ty,
+            Expr::Assign {ty, ..} => ty,
             Expr::IfExpr {ty, ..} => ty,
             Expr::StructFieldAccess {ty, ..} => ty,
             Expr::ArrayAccess {ty, ..} => ty,
@@ -133,6 +136,7 @@ impl InfoNode for Expr {
             Expr::Float {i, ..} => i.clone(),
             Expr::UnOp {i, ..} => i.clone(),
             Expr::BinOp {i, ..} => i.clone(),
+            Expr::Assign {i, ..} => i.clone(),
             Expr::IfExpr {i, ..} => i.clone(),
             Expr::StructFieldAccess {i, ..} => i.clone(),
             Expr::ArrayAccess {i, ..} => i.clone(),
@@ -161,6 +165,10 @@ impl Ord for Expr {
                 llhs.cmp(rlhs)
                     .then(lop.cmp(rop))
                     .then(lrhs.cmp(rrhs))
+            },
+            ( Expr::Assign {lhs: llhs, rhs: lrhs, ..}
+            , Expr::Assign {lhs: rlhs, rhs: rrhs, ..} ) => {
+                llhs.cmp(rlhs).then(lrhs.cmp(rrhs))
             },
             ( Expr::IfExpr {cond: lcond, thn: lthn, els: lels, ..}
             , Expr::IfExpr {cond: rcond, thn: rthn, els: rels, ..} ) => {
@@ -225,6 +233,11 @@ impl SMapAccum<Expr> for Expr {
                     lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i
                 }))
             },
+            Expr::Assign {lhs, rhs, ty, i} => {
+                let (acc, lhs) = f(acc?, *lhs)?;
+                let (acc, rhs) = f(acc, *rhs)?;
+                Ok((acc, Expr::Assign {lhs: Box::new(lhs), rhs: Box::new(rhs), ty, i}))
+            },
             Expr::IfExpr {cond, thn, els, ty, i} => {
                 let (acc, cond) = f(acc?, *cond)?;
                 let (acc, thn) = f(acc, *thn)?;
@@ -275,6 +288,7 @@ impl SFold<Expr> for Expr {
         match self {
             Expr::UnOp {arg, ..} => f(acc?, arg),
             Expr::BinOp {lhs, rhs, ..} => f(f(acc?, lhs)?, rhs),
+            Expr::Assign {lhs, rhs, ..} => f(f(acc?, lhs)?, rhs),
             Expr::IfExpr {cond, thn, els, ..} => f(f(f(acc?, cond)?, thn)?, els),
             Expr::StructFieldAccess {target, ..} => f(acc?, target),
             Expr::ArrayAccess {target, idx, ..} => f(f(acc?, target)?, idx),
@@ -355,7 +369,6 @@ pub enum SyncScope {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Stmt {
     Definition {ty: Type, id: Name, expr: Expr, i: Info},
-    Assign {dst: Expr, expr: Expr, i: Info},
     For {
         var_ty: Type, var: Name, init: Expr, cond: Expr,
         incr: Expr, body: Vec<Stmt>, i: Info
@@ -405,7 +418,6 @@ impl InfoNode for Stmt {
     fn get_info(&self) -> Info {
         match self {
             Stmt::Definition {i, ..} => i.clone(),
-            Stmt::Assign {i, ..} => i.clone(),
             Stmt::For {i, ..} => i.clone(),
             Stmt::If {i, ..} => i.clone(),
             Stmt::While {i, ..} => i.clone(),
@@ -435,11 +447,6 @@ impl SMapAccum<Expr> for Stmt {
             Stmt::Definition {ty, id, expr, i} => {
                 let (acc, expr) = f(acc?, expr)?;
                 Ok((acc, Stmt::Definition {ty, id, expr, i}))
-            },
-            Stmt::Assign {dst, expr, i} => {
-                let (acc, dst) = f(acc?, dst)?;
-                let (acc, expr) = f(acc, expr)?;
-                Ok((acc, Stmt::Assign {dst, expr, i}))
             },
             Stmt::For {var_ty, var, init, cond, incr, body, i} => {
                 let (acc, init) = f(acc?, init)?;
@@ -507,7 +514,6 @@ impl SFold<Expr> for Stmt {
     ) -> Result<A, E> {
         match self {
             Stmt::Definition {expr, ..} => f(acc?, expr),
-            Stmt::Assign {dst, expr, ..} => f(f(acc?, dst)?, expr),
             Stmt::For {init, cond, incr, ..} => f(f(f(acc?, init)?, cond)?, incr),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::While {cond, ..} => f(acc?, cond),
@@ -556,7 +562,7 @@ impl SMapAccum<Stmt> for Stmt {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i}))
             },
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
+            Stmt::Definition {..} | Stmt::Return {..} |
             Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
             Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
@@ -579,7 +585,7 @@ impl SFold<Stmt> for Stmt {
             Stmt::While {body, ..} => body.sfold_result(acc, &f),
             Stmt::Scope {body, ..} => body.sfold_result(acc, &f),
             Stmt::ParallelReduction {body, ..} => body.sfold_result(acc, &f),
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
+            Stmt::Definition {..} | Stmt::Return {..} |
             Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
             Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocDevice {..} | Stmt::AllocShared {..} |
@@ -612,7 +618,7 @@ impl SFlatten<Stmt> for Stmt {
                 let body = body.sflatten_result(vec![], &f)?;
                 acc.push(Stmt::Scope {body, i})
             }
-            Stmt::Definition {..} | Stmt::Assign {..} | Stmt::Return {..} |
+            Stmt::Definition {..} | Stmt::Return {..} |
             Stmt::Expr {..} | Stmt::ParallelReduction {..} | Stmt::Synchronize {..} |
             Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocDevice {..} | Stmt::AllocShared {..} | Stmt::FreeDevice {..} |

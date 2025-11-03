@@ -20,12 +20,16 @@ fn generate_warp_reduction(
         ty: value.get_type().clone(),
         i: i.clone()
     };
-    let sync_stmt = Stmt::Assign {
-        dst: value.clone(),
-        expr: Expr::BinOp {
-            lhs: Box::new(value),
-            op: op,
-            rhs: Box::new(rhs),
+    let sync_stmt = Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(value.clone()),
+            rhs: Box::new(Expr::BinOp {
+                lhs: Box::new(value),
+                op: op,
+                rhs: Box::new(rhs),
+                ty: res_ty.clone(),
+                i: i.clone()
+            }),
             ty: res_ty,
             i: i.clone()
         },
@@ -84,9 +88,13 @@ fn generate_cluster_init_shared_memory(
     };
     acc.push(Stmt::If {
         cond: is_first_thread_of_block,
-        thn: vec![Stmt::Assign {
-            dst: block_smem,
-            expr: data.temp_var.clone(),
+        thn: vec![Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(block_smem),
+                rhs: Box::new(data.temp_var.clone()),
+                ty: data.res_ty.clone(),
+                i: data.i.clone()
+            },
             i: data.i.clone()
         }],
         els: vec![],
@@ -164,9 +172,13 @@ fn generate_cluster_iterative_reduction(
     };
     loop_body.push(Stmt::If {
         cond: is_first_thread_of_block.clone(),
-        thn: vec![Stmt::Assign {
-            dst: data.temp_var.clone(),
-            expr: combined_smem_data,
+        thn: vec![Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(data.temp_var.clone()),
+                rhs: Box::new(combined_smem_data),
+                ty: data.res_ty.clone(),
+                i: i.clone()
+            },
             i: i.clone()
         }],
         els: vec![],
@@ -178,9 +190,13 @@ fn generate_cluster_iterative_reduction(
     // temporary variable and synchronize to avoid data races.
     loop_body.push(Stmt::If {
         cond: is_first_thread_of_block,
-        thn: vec![Stmt::Assign {
-            dst: block_smem.clone(),
-            expr: data.temp_var.clone(),
+        thn: vec![Stmt::Expr {
+            e: Expr::Assign {
+                lhs: Box::new(block_smem.clone()),
+                rhs: Box::new(data.temp_var.clone()),
+                ty: data.res_ty.clone(),
+                i: i.clone()
+            },
             i: i.clone()
         }],
         els: vec![],
@@ -220,9 +236,13 @@ fn generate_cluster_temp_assignment(
     block_smem: Expr,
     acc: &mut Vec<Stmt>
 ) {
-    acc.push(Stmt::Assign {
-        dst: data.temp_var.clone(),
-        expr: block_smem,
+    acc.push(Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(data.temp_var.clone()),
+            rhs: Box::new(block_smem),
+            ty: data.res_ty.clone(),
+            i: data.i.clone()
+        },
         i: data.i.clone()
     });
 }
