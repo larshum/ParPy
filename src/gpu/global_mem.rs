@@ -122,27 +122,36 @@ fn write_temporary_result_on_first_thread_only(
         ty: ty.clone(), id: temp_id, expr: rhs, i: i.clone()
     };
     acc.push(assign_rhs_to_fresh_temp);
-    let write_to_lhs = Stmt::Expr {
-        e: Expr::Assign {
-            lhs: Box::new(lhs),
-            rhs: Box::new(temp_var.clone()),
-            ty,
-            i: i.clone()
-        },
-        i: i.clone()
-    };
-    acc.push(Stmt::If {
-        cond: Expr::BinOp {
-            lhs: Box::new(Expr::ThreadIdx {
-                dim: Dim::X, ty: int_ty.clone(), i: i.clone()
+    // NOTE(larshum, 2025-11-03): By converting the results of both sides to void, we indicate that
+    // the resulting values are being ignored (in C). By doing this, we ensure that they are
+    // ignored.
+    acc.push(Stmt::Expr {
+        e: Expr::IfExpr {
+            cond: Box::new(Expr::BinOp {
+                lhs: Box::new(Expr::ThreadIdx {
+                    dim: Dim::X, ty: int_ty.clone(), i: i.clone()
+                }),
+                op: BinOp::Eq,
+                rhs: Box::new(Expr::Int {v: 0, ty: int_ty.clone(), i: i.clone()}),
+                ty: Type::Scalar {sz: ElemSize::Bool},
+                i: i.clone()
             }),
-            op: BinOp::Eq,
-            rhs: Box::new(Expr::Int {v: 0, ty: int_ty.clone(), i: i.clone()}),
-            ty: Type::Scalar {sz: ElemSize::Bool},
+            thn: Box::new(Expr::Convert {
+                e: Box::new(Expr::Assign {
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(temp_var.clone()),
+                    ty: ty.clone(),
+                    i: i.clone()
+                }),
+                ty: Type::Void
+            }),
+            els: Box::new(Expr::Convert {
+                e: Box::new(Expr::Int {v: 0, ty: ty.clone(), i: i.clone()}),
+                ty: Type::Void
+            }),
+            ty: Type::Void,
             i: i.clone()
         },
-        thn: vec![write_to_lhs],
-        els: vec![],
         i: i.clone()
     });
     acc.push(Stmt::Synchronize {scope: SyncScope::Block, i: i.clone()});
@@ -253,18 +262,24 @@ mod test {
             } else {
                 panic!("Unexpected form of initialization of temporary value.");
             };
-            if let Stmt::If {cond, thn, els, i: _} = b.clone() {
+            if let Stmt::Expr {e: Expr::IfExpr {cond, thn, els, ..}, ..} = b.clone() {
                 let l = Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I32), i: i()};
                 let r = int(0, Some(ElemSize::I32));
-                assert_eq!(cond, binop(l, BinOp::Eq, r, scalar(ElemSize::Bool)));
-                match &thn[..] {
-                    [Stmt::Expr {e: Expr::Assign {lhs, rhs, ..}, ..}] => {
+                assert_eq!(*cond, binop(l, BinOp::Eq, r, scalar(ElemSize::Bool)));
+                if let Expr::Convert {e, ty} = thn.as_ref() {
+                    assert!(matches!(ty, Type::Void));
+                    if let Expr::Assign {lhs, rhs, ..} = e.as_ref() {
                         assert!(matches!(*lhs.clone(), Expr::ArrayAccess {..}));
                         assert!(matches!(*rhs.clone(), Expr::Var {..}));
-                    },
-                    _ => panic!("Unexpected form of assignment")
+                    } else {
+                        panic!("Unexpected form of assignment (no assignment)")
+                    }
+                } else {
+                    panic!("Unexpected form of assignment (no conversion)")
                 }
-                assert_eq!(els, vec![]);
+                // The else-branch is a conversion expression consisting of an integer literal that
+                // we cast to void, so that its type is ignored.
+                assert!(matches!(*els, Expr::Convert {ty: Type::Void, ..}));
             } else {
                 panic!("Unexpected form of conditional statement");
             };

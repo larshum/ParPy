@@ -105,27 +105,66 @@ fn unroll_stmt(
         ofs += num_threads;
     }
     // Insert a conditionally executed statement, that we only run for threads whose index is below
-    // a certain upper-bound.
+    // a certain upper-bound. If the statement is an assignment, we wrap it in an if-expression to
+    // help later analyses as it remains in the same scope.
     if ofs < hi {
         let sub_env = mk_sub_env(ofs);
         let max_thread_idx = hi - ofs;
-        let cond_stmt = Stmt::If {
-            cond: Expr::BinOp {
-                lhs: Box::new(Expr::ThreadIdx {
-                    dim: Dim::X, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
-                }),
-                op: BinOp::Lt,
-                rhs: Box::new(Expr::Int {
-                    v: max_thread_idx, ty: ty.clone(), i: i.clone()
-                }),
-                ty: ty.clone(),
-                i: i.clone()
+        match stmt {
+            Stmt::Expr {e: e @ Expr::Assign {..}, ..} => {
+                let els_expr = Expr::Convert {
+                    e: Box::new(Expr::Int {
+                        v: 0, ty: Type::Scalar {sz: ElemSize::I32}, i: i.clone()
+                    }),
+                    ty: Type::Void
+                };
+                let ternary_stmt = Stmt::Expr {
+                    e: Expr::IfExpr {
+                        cond: Box::new(Expr::BinOp {
+                            lhs: Box::new(Expr::ThreadIdx {
+                                dim: Dim::X,
+                                ty: Type::Scalar {sz: ElemSize::U32},
+                                i: i.clone()
+                            }),
+                            op: BinOp::Lt,
+                            rhs: Box::new(Expr::Int {
+                                v: max_thread_idx, ty: ty.clone(), i: i.clone()
+                            }),
+                            ty: ty.clone(),
+                            i: i.clone()
+                        }),
+                        thn: Box::new(Expr::Convert {
+                            e: Box::new(e.sub_vars(&sub_env)),
+                            ty: Type::Void
+                        }),
+                        els: Box::new(els_expr),
+                        ty: ty.clone(),
+                        i: i.clone()
+                    },
+                    i: i.clone()
+                };
+                acc.push(ternary_stmt);
             },
-            thn: vec![stmt.sub_vars(&sub_env)],
-            els: vec![],
-            i: i.clone()
-        };
-        acc.push(cond_stmt);
+            _ => {
+                let cond_stmt = Stmt::If {
+                    cond: Expr::BinOp {
+                        lhs: Box::new(Expr::ThreadIdx {
+                            dim: Dim::X, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
+                        }),
+                        op: BinOp::Lt,
+                        rhs: Box::new(Expr::Int {
+                            v: max_thread_idx, ty: ty.clone(), i: i.clone()
+                        }),
+                        ty: ty.clone(),
+                        i: i.clone()
+                    },
+                    thn: vec![stmt.sub_vars(&sub_env)],
+                    els: vec![],
+                    i: i.clone()
+                };
+                acc.push(cond_stmt);
+            }
+        }
     }
     acc
 }
