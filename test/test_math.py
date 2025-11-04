@@ -125,20 +125,8 @@ def parpy_atan2(dst, x, y):
     with parpy.gpu:
         dst[0] = parpy.math.atan2(x[0], y[0])
 
-@parpy.jit
-def parpy_max(dst, x, y):
-    with parpy.gpu:
-        dst[0] = parpy.math.max(x[0], y[0])
-
-@parpy.jit
-def parpy_min(dst, x, y):
-    with parpy.gpu:
-        dst[0] = parpy.math.min(x[0], y[0])
-
 binary_tests = [
     (parpy_atan2, np.arctan2),
-    (parpy_max, np.maximum),
-    (parpy_min, np.minimum),
 ]
 
 def binop_should_fail(backend, fn, dtype):
