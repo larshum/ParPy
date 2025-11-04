@@ -10,20 +10,6 @@ def maximum(x, y):
 def minimum(x, y):
     return np.minimum(x, y)
 
-# Unary reduction operators
-
-def max(x):
-    return np.max(x)
-
-def min(x):
-    return np.min(x)
-
-def sum(x):
-    return np.sum(x)
-
-def prod(x):
-    return np.prod(x)
-
 # Built-in utility functions for controlling the generated code
 
 gpu = contextlib.nullcontext()

@@ -32,7 +32,7 @@ def syrk_data():
 def syrk_par_spec(N, nthreads):
     return {
         'i': parpy.threads(N),
-        'k': parpy.threads(nthreads).reduce()
+        'k': parpy.threads(nthreads).par_reduction()
     }
 
 def syrk_run_par(backend, nthreads):

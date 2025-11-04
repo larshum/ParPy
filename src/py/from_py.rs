@@ -313,6 +313,7 @@ fn convert_builtin<'py, 'a>(
     let py = func.py();
     let parpy = py.import("parpy")?;
     let parpy_builtins = parpy.getattr("builtin")?;
+    let parpy_reduce = parpy.getattr("reduce")?;
     match eval_node(&func, &env, py) {
         Ok(e) => {
             // Constants
@@ -326,13 +327,13 @@ fn convert_builtin<'py, 'a>(
                 Some(convert_binary_extrema_builtin(BinOp::Min, args, env, i)?)
 
             // Reduction operators
-            } else if e.eq(parpy_builtins.getattr("max")?)? {
+            } else if e.eq(parpy_reduce.getattr("max")?)? {
                 Some(convert_reduction_builtin(ReduceOp::Max, args, env, i)?)
-            } else if e.eq(parpy_builtins.getattr("min")?)? {
+            } else if e.eq(parpy_reduce.getattr("min")?)? {
                 Some(convert_reduction_builtin(ReduceOp::Min, args, env, i)?)
-            } else if e.eq(parpy_builtins.getattr("prod")?)? {
+            } else if e.eq(parpy_reduce.getattr("prod")?)? {
                 Some(convert_reduction_builtin(ReduceOp::Prod, args, env, i)?)
-            } else if e.eq(parpy_builtins.getattr("sum")?)? {
+            } else if e.eq(parpy_reduce.getattr("sum")?)? {
                 Some(convert_reduction_builtin(ReduceOp::Sum, args, env, i)?)
 
             // Type conversion
@@ -1041,7 +1042,7 @@ mod test {
     }
 
     #[test]
-    fn lookup_builtin_max_reduce() -> PyResult<()> {
+    fn lookup_max_reduce() -> PyResult<()> {
         let expected = Expr::ReduceOp {
             op: ReduceOp::Max,
             arg: Box::new(Expr::Var {
@@ -1052,11 +1053,11 @@ mod test {
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 22)
         };
-        lookup_builtin_ok("parpy.builtin.max(x)", expected)
+        lookup_builtin_ok("parpy.reduce.max(x)", expected)
     }
 
     #[test]
-    fn lookup_builtin_min_reduce() -> PyResult<()> {
+    fn lookup_min_reduce() -> PyResult<()> {
         let expected = Expr::ReduceOp {
             op: ReduceOp::Min,
             arg: Box::new(Expr::Var {
@@ -1067,11 +1068,11 @@ mod test {
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 22)
         };
-        lookup_builtin_ok("parpy.builtin.min(x)", expected)
+        lookup_builtin_ok("parpy.reduce.min(x)", expected)
     }
 
     #[test]
-    fn lookup_builtin_sum_reduce() -> PyResult<()> {
+    fn lookup_sum_reduce() -> PyResult<()> {
         let expected = Expr::ReduceOp {
             op: ReduceOp::Sum,
             arg: Box::new(Expr::Var {
@@ -1082,11 +1083,11 @@ mod test {
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 22)
         };
-        lookup_builtin_ok("parpy.builtin.sum(x)", expected)
+        lookup_builtin_ok("parpy.reduce.sum(x)", expected)
     }
 
     #[test]
-    fn lookup_builtin_prod_reduce() -> PyResult<()> {
+    fn lookup_prod_reduce() -> PyResult<()> {
         let expected = Expr::ReduceOp {
             op: ReduceOp::Prod,
             arg: Box::new(Expr::Var {
@@ -1097,18 +1098,18 @@ mod test {
             ty: Type::Unknown,
             i: mkinfo(1, 0, 1, 23)
         };
-        lookup_builtin_ok("parpy.builtin.prod(x)", expected)
+        lookup_builtin_ok("parpy.reduce.prod(x)", expected)
     }
 
     #[test]
-    fn lookup_builtin_sum_custom_globals() -> PyResult<()> {
+    fn lookup_sum_reduce_custom_globals() -> PyResult<()> {
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
             let parpy = py.import("parpy")?;
             let globals = vec![
-                ("parpy_builtins", parpy.getattr("builtin")?.downcast_into::<PyModule>()?)
+                ("parpy_reduce", parpy.getattr("reduce")?.downcast_into::<PyModule>()?)
             ].into_py_dict(py)?;
-            let e = lookup_builtin(py, "parpy_builtins.sum(x)", Some(globals))?;
+            let e = lookup_builtin(py, "parpy_reduce.sum(x)", Some(globals))?;
             assert!(matches!(e, Expr::ReduceOp {op: ReduceOp::Sum, ..}));
             Ok(())
         })
@@ -1528,7 +1529,7 @@ mod test {
 
     #[test]
     fn convert_expr_sum() {
-        let e = convert_expr_wrap("parpy.builtin.sum(x[:])").unwrap();
+        let e = convert_expr_wrap("parpy.reduce.sum(x[:])").unwrap();
         assert_eq!(e, Expr::ReduceOp {
             op: ReduceOp::Sum,
             arg: Box::new(Expr::Subscript {

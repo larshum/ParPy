@@ -858,7 +858,7 @@ mod test {
 
     #[test]
     fn generate_multi_block_reduction_kernel_stmt() {
-        let s = _gen_for(par::LoopPar::default().reduce().threads(2000).unwrap());
+        let s = _gen_for(par::LoopPar::default().par_reduction().threads(2000).unwrap());
         let ty = scalar(ElemSize::I64);
         let idx = binop(
             binop(

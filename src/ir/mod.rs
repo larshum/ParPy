@@ -33,7 +33,7 @@ pub fn from_python(
     // Insert the special label associated with a reduction into the parallelization mapping. This
     // is used in slicing involving reduction operations.
     let mut par = opts.parallelize.clone();
-    par.insert(REDUCE_PAR_LABEL.to_string(), LoopPar::default().reduce());
+    par.insert(REDUCE_PAR_LABEL.to_string(), LoopPar::default().par_reduction());
     let structs = struct_types::find_dict_types(&ast).to_named_structs();
     let env = from_py_ast::IREnv::new(structs.clone(), par, &opts);
     let structs = structs.into_iter()

@@ -154,10 +154,10 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
             alpha = alpha1
 
         parpy.label('state')
-        maxp = parpy.builtin.max(alpha[inst, :])
+        maxp = parpy.reduce.max(alpha[inst, :])
 
         parpy.label('state')
-        psum = parpy.builtin.sum(exp(alpha[inst, :] - maxp))
+        psum = parpy.reduce.sum(exp(alpha[inst, :] - maxp))
 
         result[inst] = maxp + log(psum)
 

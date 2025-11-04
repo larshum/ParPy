@@ -66,7 +66,7 @@ def test_spmv_gpu(backend):
         N, M = 256, 4096
         p = {
             "row": parpy.threads(N),
-            "i": parpy.threads(128).reduce()
+            "i": parpy.threads(128).par_reduction()
         }
         compare_spmv(N, M, par_opts(backend, p))
     run_if_backend_is_enabled(backend, helper)
@@ -86,7 +86,7 @@ def test_spmv_compiles(backend):
     y = torch.zeros((A["nrows"],), dtype=x.dtype)
     p = {
         "row": parpy.threads(N),
-        "i": parpy.threads(128).reduce()
+        "i": parpy.threads(128).par_reduction()
     }
     s = parpy.print_compiled(spmv_row, [A, x, y], par_opts(backend, p))
     assert len(s) != 0

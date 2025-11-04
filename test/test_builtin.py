@@ -166,7 +166,7 @@ def test_run_convert(backend, test_data, src_dtype):
         x[0] = 1
         dst = np.zeros((1,), dtype=dtype.to_numpy())
         opts = par_opts(backend, {})
-        if conversion_should_fail(backend, dtype):
+        if conversion_should_fail(backend, src_dtype, dtype):
             with pytest.raises(TypeError):
                 convert_fn(dst, x, opts=opts)
         else:

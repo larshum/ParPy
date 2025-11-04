@@ -2,12 +2,13 @@ from . import parpy
 from . import backend
 from . import buffer
 from . import builtin
-from . import math
+from . import reduce
 from . import types
+from . import math
 
 from .parpy import par, CompileBackend, CompileOptions, ElemSize, Target
 from .buffer import sync
-from .main import threads, reduce, clear_cache, compile_string, print_compiled, callback, external, jit
+from .main import threads, par_reduction, clear_cache, compile_string, print_compiled, callback, external, jit
 from .builtin import gpu, label
 
 __version__ = "0.3.0"
