@@ -81,7 +81,7 @@ def test_spmm(backend):
         p = {
             'i': parpy.threads(A["nrows"]),
             'j': parpy.threads(B["ncols"]),
-            'aidx': parpy.threads(32).reduce()
+            'aidx': parpy.threads(32).par_reduction()
         }
         C = spmm_wrap(A, B, spmm_cell, par_opts(backend, p))
         assert torch.allclose(C, expected, atol=1e-5), f"{C}\n{expected}"
@@ -106,7 +106,7 @@ def test_spmm_compiles(backend):
     p = {
         'i': parpy.threads(A["nrows"]),
         'j': parpy.threads(B["ncols"]),
-        'aidx': parpy.threads(32).reduce()
+        'aidx': parpy.threads(32).par_reduction()
     }
     s = parpy.print_compiled(spmm_cell, [A, B, C], par_opts(backend, p))
     assert len(s) != 0

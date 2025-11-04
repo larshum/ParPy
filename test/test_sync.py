@@ -11,7 +11,7 @@ def sum_rows(x, N, out):
     parpy.label('N')
     for i in range(N):
         parpy.label('M')
-        out[i] = parpy.builtin.sum(x[i,:])
+        out[i] = parpy.reduce.sum(x[i,:])
 
 @pytest.mark.parametrize('backend', compiler_backends)
 def test_reduce_multi_block(backend):
@@ -37,7 +37,7 @@ def normalize(x, N):
     parpy.label('N')
     for i in range(N):
         parpy.label('M_1')
-        s = parpy.builtin.sum(x[i,:])
+        s = parpy.reduce.sum(x[i,:])
         parpy.label('M_2')
         x[i,:] /= s
 
@@ -66,7 +66,7 @@ def sum_exp_3d(x, N, M, out):
         parpy.label('M')
         for j in range(M):
             parpy.label('K_2')
-            out[i,j] = parpy.builtin.sum(x[i,j,:])
+            out[i,j] = parpy.reduce.sum(x[i,j,:])
 
 def sum_exp_3d_wrap(backend, par):
     N, M, K = 10, 20, 30

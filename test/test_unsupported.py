@@ -87,7 +87,7 @@ def test_return_in_main_function():
         @parpy.jit
         def f_return(x):
             with parpy.gpu:
-                y = parpy.builtin.sum(x[:])
+                y = parpy.reduce.sum(x[:])
                 return y
         backend = enabled_backends[0]
         with pytest.raises(TypeError) as e_info:

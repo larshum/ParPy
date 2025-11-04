@@ -13,41 +13,41 @@ def sum_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.builtin.sum(x[i,:])
+        out[i] = parpy.reduce.sum(x[i,:])
 
 def prod_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.builtin.prod(x[i,:])
+        out[i] = parpy.reduce.prod(x[i,:])
 
 def max_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.builtin.max(x[i,:])
+        out[i] = parpy.reduce.max(x[i,:])
 
 def min_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.builtin.min(x[i,:])
+        out[i] = parpy.reduce.min(x[i,:])
 
 def sum_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.builtin.sum(x[:,:])
+    out[0] = parpy.reduce.sum(x[:,:])
 
 def prod_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.builtin.prod(x[:,:])
+    out[0] = parpy.reduce.prod(x[:,:])
 
 def max_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.builtin.max(x[:,:])
+    out[0] = parpy.reduce.max(x[:,:])
 
 def min_2d(x, out, N):
     parpy.label('outer')
-    out[0] = parpy.builtin.min(x[:,:])
+    out[0] = parpy.reduce.min(x[:,:])
 
 def reduce_wrap(reduce_fn, x, opts=None):
     N, M = x.shape
@@ -311,7 +311,7 @@ def test_odd_entries_single_block(backend):
     def helper():
         p = {
             'N': parpy.threads(10),
-            'M': parpy.threads(32).reduce()
+            'M': parpy.threads(32).par_reduction()
         }
         odd_entries_wrap(backend, p)
     run_if_backend_is_enabled(backend, helper)
@@ -321,7 +321,7 @@ def test_odd_entries_multiblock(backend):
     def helper():
         p = {
             'N': parpy.threads(10),
-            'M': parpy.threads(2048).reduce()
+            'M': parpy.threads(2048).par_reduction()
         }
         odd_entries_wrap(backend, p)
     run_if_backend_is_enabled(backend, helper)

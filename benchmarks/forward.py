@@ -4,7 +4,9 @@ from math import inf
 import os
 import pandas as pd
 import parpy
-import parpy.operators as parpy_ops
+import parpy.builtin as pb
+import parpy.math as pm
+import parpy.types as pt
 import pytest
 import statistics
 import sys
@@ -114,10 +116,10 @@ def forward_step_inst(hmm, seqs, alpha1, alpha2, inst, t):
             # Transitively inlined version of forward_prob_predecessors.
             num_kmers = hmm["num_states"] // 16
 
-            pred1 = parpy_ops.int32((state // 4) % (hmm["num_states"] // 64))
-            pred2 = parpy_ops.int32(hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
-            pred3 = parpy_ops.int32(2 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
-            pred4 = parpy_ops.int32(3 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64))
+            pred1 = pb.convert((state // 4) % (hmm["num_states"] // 64), pt.I32)
+            pred2 = pb.convert(hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), pt.I32)
+            pred3 = pb.convert(2 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), pt.I32)
+            pred4 = pb.convert(3 * hmm["num_states"] // 64 + (state // 4) % (hmm["num_states"] // 64), pt.I32)
             t11 = hmm["trans1"][pred1 % num_kmers, state % 4]
             t12 = hmm["trans1"][pred2 % num_kmers, state % 4]
             t13 = hmm["trans1"][pred3 % num_kmers, state % 4]
@@ -128,8 +130,8 @@ def forward_step_inst(hmm, seqs, alpha1, alpha2, inst, t):
             p3 = t13 + t2 + alpha_src[inst, pred3]
             p4 = t14 + t2 + alpha_src[inst, pred4]
 
-            pred5 = parpy_ops.int32(0)
-            p5 = parpy_ops.float32(0.0)
+            pred5 = pb.convert(0, pt.I32)
+            p5 = pb.convert(0.0, pt.F32)
             if state // num_kmers == 15:
                 pred5 = state
                 p5 = hmm["gamma"]
@@ -138,22 +140,22 @@ def forward_step_inst(hmm, seqs, alpha1, alpha2, inst, t):
                 p5 = hmm["synthetic_248"]
             else:
                 pred5 = ((state // num_kmers) + 1) * num_kmers + state % num_kmers
-                p5 = parpy_ops.float32(0.0)
+                p5 = 0.0
             p5 = p5 + alpha_src[inst, pred5]
 
             # Inlined version of log_sum_exp.
-            maxp = parpy_ops.max(p1, p2)
-            maxp = parpy_ops.max(maxp, p3)
-            maxp = parpy_ops.max(maxp, p4)
-            maxp = parpy_ops.max(maxp, p5)
-            lsexp = maxp + parpy_ops.log(
-                parpy_ops.exp(p1 - maxp) +
-                parpy_ops.exp(p2 - maxp) +
-                parpy_ops.exp(p3 - maxp) +
-                parpy_ops.exp(p4 - maxp) +
-                parpy_ops.exp(p5 - maxp)
+            maxp = pb.maximum(p1, p2)
+            maxp = pb.maximum(maxp, p3)
+            maxp = pb.maximum(maxp, p4)
+            maxp = pb.maximum(maxp, p5)
+            lsexp = maxp + pm.log(
+                pm.exp(p1 - maxp) +
+                pm.exp(p2 - maxp) +
+                pm.exp(p3 - maxp) +
+                pm.exp(p4 - maxp) +
+                pm.exp(p5 - maxp)
             )
-            lsexp = parpy_ops.max(lsexp, parpy_ops.float32(-parpy_ops.inf))
+            lsexp = pb.maximum(lsexp, pb.convert(-pb.inf, pt.F32))
 
             alpha_dst[inst, state] = lsexp + hmm["output_prob"][o, state % num_kmers]
 
@@ -165,26 +167,26 @@ def forward_lse_inst(hmm, seqs, result, alpha1, alpha2, inst):
         alpha = alpha1
 
     parpy.label('state')
-    maxp = parpy_ops.max(alpha[inst, :], axis=0)
+    maxp = parpy.reduce.max(alpha[inst, :])
 
     parpy.label('state')
-    psum = parpy_ops.sum(parpy_ops.exp(alpha[inst, :] - maxp), axis=0)
+    psum = parpy.reduce.sum(pm.exp(alpha[inst, :] - maxp))
 
-    result[inst] = maxp + parpy_ops.log(psum)
+    result[inst] = maxp + pm.log(psum)
 
 @parpy.jit
 def forward_kernel(hmm, seqs, result, alpha1, alpha2):
     parpy.label('inst')
     for inst in range(seqs["num_instances"]):
         # Initialization
-        forward_init_inst(hmm, seqs, alpha1, inst)
+        pb.inline(forward_init_inst(hmm, seqs, alpha1, inst))
 
         # Forward steps for t = 1, 2, .. maxlen
         for t in range(1, seqs["maxlen"]):
-            forward_step_inst(hmm, seqs, alpha1, alpha2, inst, t)
+            pb.inline(forward_step_inst(hmm, seqs, alpha1, alpha2, inst, t))
 
         # Summation of final alpha values
-        forward_lse_inst(hmm, seqs, result, alpha1, alpha2, inst)
+        pb.inline(forward_lse_inst(hmm, seqs, result, alpha1, alpha2, inst))
 
 def forward_parpy(hmm, seqs, nthreads):
     result = torch.zeros(seqs["num_instances"], dtype=torch.float32, device='cuda')

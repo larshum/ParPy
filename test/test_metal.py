@@ -22,7 +22,7 @@ def test_metal_no_parallelism(backend):
     M = 20
     x = np.random.randn(N, M).astype(np.float32)
     y = np.zeros(N).astype(np.float32)
-    p = {'M': parpy.threads(M).reduce()}
+    p = {'M': parpy.threads(M).par_reduction()}
     opts = par_opts(backend, p)
     if backend == parpy.CompileBackend.Metal:
         if parpy.backend.is_enabled(backend):

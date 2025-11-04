@@ -42,7 +42,7 @@ def mv_parpy(A, b, out, N):
     parpy.label('N')
     for row in range(N):
         parpy.label('M')
-        out[row] = parpy.operators.sum(A[row,:] * b[:])
+        out[row] = parpy.reduce.sum(A[row,:] * b[:])
 
 out = np.zeros((N,))
 opts = parpy.par({'N': parpy.threads(N)})
