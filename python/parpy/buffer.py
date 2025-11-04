@@ -1,4 +1,5 @@
 import pathlib
+import sys
 from .parpy import CompileBackend, DataType, ElemSize
 from .runtime import _compile_runtime_lib
 
@@ -173,6 +174,13 @@ class CudaBaseBuffer(BaseBuffer):
 
     def _deconstruct(self, src_ptr):
         if src_ptr is not None:
+            # NOTE(larshum, 2025-11-04): If the interpreter is about to shut
+            # down, PyTorch may raise exceptions if we interact with the
+            # underlying tensor. To avoid such ugly errors, we skip running the
+            # deconstructor, which is fine since the data is freed by the OS
+            # anyway.
+            if sys.is_finalizing():
+                return
             buf_ptr, _, _ = _extract_array_interface(self.buf, allow_cuda=True)
             lib = self._get_runtime_lib()
             _check_errors(lib, lib.parpy_memcpy(src_ptr, buf_ptr, self.nbytes, 2))
