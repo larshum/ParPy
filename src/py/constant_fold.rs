@@ -80,17 +80,6 @@ pub fn fold_expr(e: Expr) -> Expr {
             let rhs = fold_expr(*rhs);
             constant_fold_binop(lhs, op, rhs, ty, i)
         },
-        Expr::Convert {e, ty, i} => {
-            let e = fold_expr(*e);
-            match e {
-                Expr::Float {v, ..} if v.is_infinite() => {
-                    Expr::Float {v, ty, i}
-                },
-                _ => {
-                    Expr::Convert {e: Box::new(e), ty, i}
-                }
-            }
-        },
         _ => e.smap(fold_expr)
     }
 }
@@ -314,6 +303,6 @@ mod test {
             ty: scalar(ElemSize::F16),
             i: i()
         };
-        assert_eq!(fold_expr(e), float(f64::INFINITY, Some(ElemSize::F16)));
+        assert_eq!(fold_expr(e.clone()), e);
     }
 }
