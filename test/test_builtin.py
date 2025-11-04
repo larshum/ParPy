@@ -70,7 +70,7 @@ def test_compile_binary_operation(backend, test_data, dtype):
     opts = par_opts(backend, {})
     if binop_should_fail(backend, dtype):
         with pytest.raises(TypeError):
-            parpy_fn(dst, x, opts=opts)
+            parpy.print_compiled(parpy_fn, [dst, x], opts)
     else:
         code = parpy.print_compiled(parpy_fn, [dst, x], opts)
         assert len(code) != 0
