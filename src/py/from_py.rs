@@ -149,6 +149,23 @@ fn eval_node<'py, 'a>(
     eval_name(s, env, py)
 }
 
+fn convert_binary_extrema_builtin<'py, 'a>(
+    op: BinOp,
+    mut args: Vec<Bound<'py, PyAny>>,
+    env: &ConvertEnv<'py, 'a>,
+    i: Info
+) -> PyResult<Expr> {
+    let n = args.len();
+    if n == 2 {
+        let rhs = convert_expr(args.pop().unwrap(), env)?;
+        let lhs = convert_expr(args.pop().unwrap(), env)?;
+        Ok(Expr::BinOp {lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty: Type::Unknown, i})
+    } else {
+        let op = op.pprint_default();
+        py_runtime_error!(i, "{n} arguments were provided to binary builtin {op}")
+    }
+}
+
 fn convert_reduction_builtin<'py, 'a>(
     op: ReduceOp,
     mut args: Vec<Bound<'py, PyAny>>,
@@ -301,6 +318,12 @@ fn convert_builtin<'py, 'a>(
             // Constants
             let res = if e.eq(parpy_builtins.getattr("inf")?)? {
                 Some(Expr::Float {v: f64::INFINITY, ty: Type::Unknown, i})
+
+            // Binary operations for computing max/min
+            } else if e.eq(parpy_builtins.getattr("maximum")?)? {
+                Some(convert_binary_extrema_builtin(BinOp::Max, args, env, i)?)
+            } else if e.eq(parpy_builtins.getattr("minimum")?)? {
+                Some(convert_binary_extrema_builtin(BinOp::Min, args, env, i)?)
 
             // Reduction operators
             } else if e.eq(parpy_builtins.getattr("max")?)? {
