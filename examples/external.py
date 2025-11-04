@@ -27,7 +27,7 @@ x = np.random.randint(1, 1000, (N,)).astype(np.int32)
 count_seq = sum([popcount(y) for y in x])
 
 # Comparing parallelized results to sequential version
-p = {'N': parpy.threads(N).reduce()}
+p = {'N': parpy.threads(N).par_reduction()}
 opts = parpy.par(p)
 count_par = np.array([0], dtype=np.int32)
 popcount_many(x, count_par, N, opts=opts)

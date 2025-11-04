@@ -9,7 +9,7 @@ def normalize_rows(t, nrows, ncols):
     parpy.label('i')
     for i in range(nrows):
         parpy.label('j1')
-        s = parpy.builtin.sum(t[i, :])
+        s = parpy.reduce.sum(t[i, :])
 
         parpy.label('j2')
         t[i, :] /= s
@@ -37,7 +37,7 @@ def test_normalize_multirow(backend):
         y1 = torch.nn.functional.normalize(t, p=1, dim=1)
         p = {
             "i": parpy.threads(256),
-            "j1": parpy.threads(128).reduce(),
+            "j1": parpy.threads(128).par_reduction(),
             "j2": parpy.threads(128)
         }
         y2 = normalize_wrap(t, par_opts(backend, p))
@@ -65,7 +65,7 @@ def test_normalize_print_ast(backend):
     ]
     p = {
         "i": parpy.threads(256),
-        "j1": parpy.threads(128).reduce(),
+        "j1": parpy.threads(128).par_reduction(),
         "j2": parpy.threads(128)
     }
     s = parpy.print_compiled(normalize_rows_no_annot, args, par_opts(backend, p))

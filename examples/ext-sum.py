@@ -1,11 +1,13 @@
 import os
 import parpy
 
+N = parpy.types.symbol()
+
 @parpy.external(
     "warp_sum", parpy.CompileBackend.Cuda, parpy.Target.Device,
     header="<cuda_helper.h>", parallelize=parpy.threads(32)
 )
-def warp_sum(x: parpy.types.pointer(parpy.types.I32)) -> parpy.types.I32:
+def warp_sum(x: parpy.types.buffer(parpy.types.I32, [N])) -> parpy.types.I32:
     return sum(x)
 
 # Declaring data for the problem

@@ -129,12 +129,12 @@ def threads(n):
     """
     return parpy.LoopPar().threads(n)
 
-def reduce():
+def par_reduction():
     """
     Produces a LoopPar object (used in parallel specifications) representing a
     parallelizable reduction.
     """
-    return parpy.LoopPar().reduce()
+    return parpy.LoopPar().par_reduction()
 
 def clear_cache():
     """

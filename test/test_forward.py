@@ -1,7 +1,8 @@
 import importlib
 import numpy as np
 import parpy
-from parpy.builtin import convert, inf, max, sum
+import parpy.builtin
+from parpy.builtin import convert, inf
 from parpy.math import exp, log
 import pytest
 import torch
@@ -133,15 +134,15 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
                     p5 = p5 + alpha_src[inst, pred5]
 
                     # Inlined version of log_sum_exp.
-                    maxp = parpy.math.max(p1, p2)
-                    maxp = parpy.math.max(maxp, p3)
-                    maxp = parpy.math.max(maxp, p4)
-                    maxp = parpy.math.max(maxp, p5)
+                    maxp = parpy.builtin.maximum(p1, p2)
+                    maxp = parpy.builtin.maximum(maxp, p3)
+                    maxp = parpy.builtin.maximum(maxp, p4)
+                    maxp = parpy.builtin.maximum(maxp, p5)
                     lsexp = maxp + log(
                         exp(p1 - maxp) + exp(p2 - maxp) + exp(p3 - maxp) +
                         exp(p4 - maxp) + exp(p5 - maxp)
                     )
-                    lsexp = parpy.math.max(lsexp, convert(-inf, parpy.types.F32))
+                    lsexp = parpy.builtin.maximum(lsexp, convert(-inf, parpy.types.F32))
 
                     alpha_dst[inst, state] = lsexp + hmm["output_prob"][o, state % num_kmers]
                 elif t == seqs["lens"][inst]:
@@ -153,10 +154,10 @@ def forward_kernel(hmm, seqs, alpha1, alpha2, result):
             alpha = alpha1
 
         parpy.label('state')
-        maxp = max(alpha[inst, :])
+        maxp = parpy.reduce.max(alpha[inst, :])
 
         parpy.label('state')
-        psum = sum(exp(alpha[inst, :] - maxp))
+        psum = parpy.reduce.sum(exp(alpha[inst, :] - maxp))
 
         result[inst] = maxp + log(psum)
 

@@ -54,7 +54,7 @@ impl LoopPar {
         }
     }
 
-    pub fn reduce(&self) -> Self {
+    pub fn par_reduction(&self) -> Self {
         LoopPar {reduction: true, ..self.clone()}
     }
 
@@ -175,7 +175,7 @@ mod test {
     #[test]
     fn merge_equal_reduction() {
         let p1 = loop_par2();
-        let p2 = loop_par2().reduce();
+        let p2 = loop_par2().par_reduction();
         assert_eq!(p1.try_merge(Some(&p2.clone())), Some(p2));
     }
 }
