@@ -50,7 +50,7 @@ def test_run_binary_operation(backend, test_data, dtype):
         dst = np.zeros((1,), dtype=dtype.to_numpy())
         opts = par_opts(backend, {})
         if binop_should_fail(backend, dtype):
-            with pytest.raises(RuntimeError):
+            with pytest.raises(TypeError):
                 parpy_fn(dst, x, opts=opts)
         else:
             parpy_fn(dst, x, opts=opts)
@@ -69,7 +69,7 @@ def test_compile_binary_operation(backend, test_data, dtype):
     dst = np.zeros((1,), dtype=dtype.to_numpy())
     opts = par_opts(backend, {})
     if binop_should_fail(backend, dtype):
-        with pytest.raises(RuntimeError):
+        with pytest.raises(TypeError):
             parpy_fn(dst, x, opts=opts)
     else:
         code = parpy.print_compiled(parpy_fn, [dst, x], opts)
