@@ -11,4 +11,4 @@ from .buffer import sync
 from .main import threads, par_reduction, clear_cache, compile_string, print_compiled, callback, external, jit
 from .builtin import gpu, label
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
