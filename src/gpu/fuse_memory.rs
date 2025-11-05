@@ -435,6 +435,27 @@ mod test {
     }
 
     #[test]
+    fn skip_fusion_for_shared_memory() {
+        let dst = var("x", pointer(scalar(ElemSize::F32), MemSpace::Device));
+        let loc = array_access(
+            dst.clone(),
+            int(1, Some(ElemSize::I32)),
+            scalar(ElemSize::F32)
+        );
+        let body = vec![
+            Stmt::AllocShared {
+                elem_ty: scalar(ElemSize::F32),
+                id: Name::new("x".to_string()),
+                sz: 10,
+                i: i()
+            },
+            assign(loc.clone(), float(1.0, Some(ElemSize::F32))),
+            assign(loc.clone(), float(2.0, Some(ElemSize::F32)))
+        ];
+        assert_eq_bodies(apply_kernel_body(body.clone()).unwrap(), body);
+    }
+
+    #[test]
     fn fuse_write_read_write() {
         let loc = array_access(
             var("x", pointer(scalar(ElemSize::F32), MemSpace::Device)),
