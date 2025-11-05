@@ -384,3 +384,84 @@ fn apply_top(t: Top) -> CompileResult<Top> {
 pub fn apply(ast: Ast) -> CompileResult<Ast> {
     ast.smap_result(apply_top)
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::test::*;
+    use crate::gpu::ast_builder::*;
+    use crate::gpu::unsymbolize::Unsymbolize;
+    use crate::utils::pprint::*;
+
+    fn strip_symbols(body: Vec<Stmt>) -> Vec<Stmt> {
+        body.into_iter()
+            .map(|s| s.unsymbolize())
+            .collect::<_>()
+    }
+
+    fn assert_eq_bodies(l: Vec<Stmt>, r: Vec<Stmt>) {
+        let l = strip_symbols(l);
+        let r = strip_symbols(r);
+        assert_eq!(
+            l,
+            r,
+            "LHS:\n{}\nRHS:\n{}",
+            pprint_iter(l.iter(), PrettyPrintEnv::default(), "\n").1,
+            pprint_iter(r.iter(), PrettyPrintEnv::default(), "\n").1,
+        );
+    }
+
+    #[test]
+    fn fuse_write_write() {
+        let loc = array_access(
+            var("x", pointer(scalar(ElemSize::F32), MemSpace::Device)),
+            int(1, Some(ElemSize::I32)),
+            scalar(ElemSize::F32)
+        );
+        let body = vec![
+            assign(loc.clone(), float(1.0, Some(ElemSize::F32))),
+            assign(loc.clone(), float(2.0, Some(ElemSize::F32)))
+        ];
+        let expected = vec![
+            Stmt::Definition {
+                ty: scalar(ElemSize::F32),
+                id: Name::new("t".to_string()),
+                expr: float(1.0, Some(ElemSize::F32)),
+                i: i()
+            },
+            assign(loc, float(2.0, Some(ElemSize::F32)))
+        ];
+        assert_eq_bodies(apply_kernel_body(body.clone()).unwrap(), expected);
+    }
+
+    #[test]
+    fn fuse_write_read_write() {
+        let loc = array_access(
+            var("x", pointer(scalar(ElemSize::F32), MemSpace::Device)),
+            int(1, Some(ElemSize::I32)),
+            scalar(ElemSize::F32)
+        );
+        let body = vec![
+            assign(loc.clone(), float(1.0, Some(ElemSize::F32))),
+            assign(var("y", scalar(ElemSize::F32)), loc.clone()),
+            assign(loc.clone(), float(2.0, Some(ElemSize::F32))),
+        ];
+        let id = Name::new("t".to_string());
+        let temp_var = Expr::Var {
+            id: id.clone(),
+            ty: scalar(ElemSize::F32),
+            i: i()
+        };
+        let expected = vec![
+            Stmt::Definition {
+                ty: scalar(ElemSize::F32),
+                id,
+                expr: float(1.0, Some(ElemSize::F32)),
+                i: i()
+            },
+            assign(var("y", scalar(ElemSize::F32)), temp_var),
+            assign(loc, float(2.0, Some(ElemSize::F32)))
+        ];
+        assert_eq_bodies(apply_kernel_body(body).unwrap(), expected);
+    }
+}
