@@ -104,6 +104,11 @@ fn from_gpu_ir_expr(env: &CodegenEnv, e: gpu_ast::Expr) -> CompileResult<Expr> {
             let rhs = Box::new(from_gpu_ir_expr(env, *rhs)?);
             Ok(Expr::BinOp {lhs, op, rhs, ty, i})
         },
+        gpu_ast::Expr::Assign {lhs, rhs, i, ..} => {
+            let lhs = Box::new(from_gpu_ir_expr(env, *lhs)?);
+            let rhs = Box::new(from_gpu_ir_expr(env, *rhs)?);
+            Ok(Expr::Assign {lhs, rhs, ty, i})
+        },
         gpu_ast::Expr::IfExpr {cond, thn, els, i, ..} => {
             let cond = Box::new(from_gpu_ir_expr(env, *cond)?);
             let thn = Box::new(from_gpu_ir_expr(env, *thn)?);
@@ -165,11 +170,6 @@ fn from_gpu_ir_stmt(env: &CodegenEnv, s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             let expr = from_gpu_ir_expr(env, expr)?;
             Ok(Stmt::Definition {ty, id, expr})
         },
-        gpu_ast::Stmt::Assign {dst, expr, ..} => {
-            let dst = from_gpu_ir_expr(env, dst)?;
-            let expr = from_gpu_ir_expr(env, expr)?;
-            Ok(Stmt::Assign {dst, expr})
-        },
         gpu_ast::Stmt::For {var_ty, var, init, cond, incr, body, i} => {
             let var_ty = from_gpu_ir_type(env, var_ty, &i)?;
             let init = from_gpu_ir_expr(env, init)?;
@@ -216,9 +216,15 @@ fn from_gpu_ir_stmt(env: &CodegenEnv, s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             let value = from_gpu_ir_expr(env, value)?;
             let op = from_gpu_ir_reduce_op(&op, &i)?;
             let ty = from_gpu_ir_type(env, res_ty, &i)?;
-            Ok(Stmt::Assign {
-                dst: value.clone(),
-                expr: Expr::SimdOp {op, arg: Box::new(value), ty, i}
+            Ok(Stmt::Expr {
+                e: Expr::Assign {
+                    lhs: Box::new(value.clone()),
+                    rhs: Box::new(Expr::SimdOp {
+                        op, arg: Box::new(value), ty: ty.clone(), i: i.clone()
+                    }),
+                    ty,
+                    i
+                }
             })
         },
         gpu_ast::Stmt::ClusterReduce {i, ..} => {

@@ -200,6 +200,11 @@ impl PrettyPrint for Expr {
             },
             Expr::UnOp {..} => self.print_parenthesized_unop(env),
             Expr::BinOp {..} => self.print_parenthesized_binop(env),
+            Expr::Assign {lhs, rhs, ..} => {
+                let (env, lhs) = lhs.pprint(env);
+                let (env, rhs) = rhs.pprint(env);
+                (env, format!("{lhs} = {rhs}"))
+            },
             Expr::Ternary {cond, thn, els, ..} => {
                 let (env, cond) = cond.pprint(env);
                 let (env, thn) = thn.pprint(env);
@@ -373,11 +378,6 @@ impl PrettyPrint for Stmt {
                     },
                     None => (env, format!("{indent}{s};"))
                 }
-            },
-            Stmt::Assign {dst, expr} => {
-                let (env, dst) = dst.pprint(env);
-                let (env, expr) = expr.pprint(env);
-                (env, format!("{indent}{dst} = {expr};"))
             },
             Stmt::For {var_ty, var, init, cond, incr, body} => {
                 let (env, var_ty) = var_ty.pprint(env);
@@ -765,7 +765,7 @@ mod test {
             init: int(0, ElemSize::I64),
             cond: binop(i_var.clone(), BinOp::Lt, int(10, ElemSize::I64), ty.clone()),
             incr: binop(i_var.clone(), BinOp::Add, int(1, ElemSize::I64), ty),
-            body: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y")}],
+            body: vec![assign(uvar("x"), uvar("y"))],
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!(
@@ -784,8 +784,8 @@ mod test {
                 ty: Type::Scalar {sz: ElemSize::Bool},
                 i: Info::default()
             },
-            thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y")}],
-            els: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("x")}],
+            thn: vec![assign(uvar("x"), uvar("y"))],
+            els: vec![assign(uvar("y"), uvar("x"))],
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!(
@@ -804,7 +804,7 @@ mod test {
                 ty: Type::Scalar {sz: ElemSize::Bool},
                 i: Info::default()
             },
-            thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("y")},],
+            thn: vec![assign(uvar("x"), uvar("y"))],
             els: vec![],
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -816,11 +816,11 @@ mod test {
     fn pprint_if_cond_elseif() {
         let cond = Stmt::If {
             cond: uvar("x"),
-            thn: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("z")}],
+            thn: vec![assign(uvar("y"), uvar("z"))],
             els: vec![Stmt::If {
                     cond: uvar("y"),
-                    thn: vec![Stmt::Assign {dst: uvar("x"), expr: uvar("z")}],
-                    els: vec![Stmt::Assign {dst: uvar("z"), expr: uvar("x")}],
+                    thn: vec![assign(uvar("x"), uvar("z"))],
+                    els: vec![assign(uvar("z"), uvar("x"))],
             }],
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
@@ -835,7 +835,7 @@ mod test {
     fn pprint_while() {
         let wh = Stmt::While {
             cond: uvar("x"),
-            body: vec![Stmt::Assign {dst: uvar("y"), expr: uvar("z")}]
+            body: vec![assign(uvar("y"), uvar("z"))]
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("while (x) {{\n{indent}y = z;\n}}");
@@ -903,9 +903,7 @@ mod test {
             attrs: vec![],
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![
-                Stmt::Assign {dst: uvar("x"), expr: uvar("y")}
-            ]
+            body: vec![assign(uvar("x"), uvar("y"))]
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("extern \"C\"\nvoid f() {{\n{0}x = y;\n}}", indent);
@@ -920,9 +918,7 @@ mod test {
             attrs: vec![KernelAttribute::LaunchBounds {threads: 256}],
             id: Name::new("f".to_string()),
             params: vec![],
-            body: vec![
-                Stmt::Assign {dst: uvar("x"), expr: uvar("y")}
-            ]
+            body: vec![assign(uvar("x"), uvar("y"))]
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
         let expected = format!("__global__\nvoid\n__launch_bounds__(256)\nf() {{\n{0}x = y;\n}}", indent);

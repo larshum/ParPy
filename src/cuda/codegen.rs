@@ -81,6 +81,11 @@ fn from_gpu_ir_expr(e: gpu_ast::Expr) -> CompileResult<Expr> {
             validate_binary_operation(&op, &ty, &i)?;
             Ok(Expr::BinOp {lhs: Box::new(lhs), op, rhs: Box::new(rhs), ty, i})
         },
+        gpu_ast::Expr::Assign {lhs, rhs, i, ..} => {
+            let lhs = from_gpu_ir_expr(*lhs)?;
+            let rhs = from_gpu_ir_expr(*rhs)?;
+            Ok(Expr::Assign {lhs: Box::new(lhs), rhs: Box::new(rhs), ty, i})
+        },
         gpu_ast::Expr::IfExpr {cond, thn, els, i, ..} => {
             let cond = from_gpu_ir_expr(*cond)?;
             let thn = from_gpu_ir_expr(*thn)?;
@@ -132,11 +137,6 @@ fn from_gpu_ir_stmt(s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             let ty = from_gpu_ir_type(ty);
             let expr = from_gpu_ir_expr(expr)?;
             Ok(Stmt::Definition {ty, id, expr: Some(expr)})
-        },
-        gpu_ast::Stmt::Assign {dst, expr, ..} => {
-            let dst = from_gpu_ir_expr(dst)?;
-            let expr = from_gpu_ir_expr(expr)?;
-            Ok(Stmt::Assign {dst, expr})
         },
         gpu_ast::Stmt::For {var_ty, var, init, cond, incr, body, ..} => {
             let var_ty = from_gpu_ir_type(var_ty);

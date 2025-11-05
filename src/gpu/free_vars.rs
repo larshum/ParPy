@@ -15,10 +15,10 @@ impl FreeVars<py_ast::Type> for Expr {
                 args.sfold(env, |env, e: &py_ast::Expr| e.fv(env))
             },
             Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
-            Expr::UnOp {..} | Expr::BinOp {..} | Expr::IfExpr {..} |
-            Expr::StructFieldAccess {..} | Expr::ArrayAccess {..} |
-            Expr::Call {..} | Expr::Convert {..} | Expr::Struct {..} |
-            Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::Assign {..} |
+            Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
+            Expr::ArrayAccess {..} | Expr::Call {..} | Expr::Convert {..} |
+            Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
                 self.sfold(env, |env, e| e.fv(env))
             }
         }
@@ -43,12 +43,11 @@ impl FreeVars<py_ast::Type> for Stmt {
             Stmt::AllocShared {id, ..} => {
                 bind_variable(env, &id, &py_ast::Type::Unknown)
             },
-            Stmt::Assign {..} | Stmt::If {..} | Stmt::While {..} |
-            Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
-            Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
-            Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
-            Stmt::AllocDevice {..} | Stmt::FreeDevice {..} |
-            Stmt::CopyMemory {..} => {
+            Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} |
+            Stmt::Scope {..} | Stmt::Expr {..} | Stmt::Synchronize {..} |
+            Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} |
+            Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
+            Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
                 let env = self.sfold(env, |env, s: &Stmt| s.fv(env));
                 self.sfold(env, |env, e: &Expr| e.fv(env))
             }
@@ -61,10 +60,11 @@ impl FreeVars<Type> for Expr {
         match self {
             Expr::Var {id, ty, ..} => use_variable(env, &id, &ty),
             Expr::Bool {..} | Expr::Int {..} | Expr::Float {..} |
-            Expr::UnOp {..} | Expr::BinOp {..} | Expr::IfExpr {..} |
-            Expr::StructFieldAccess {..} | Expr::ArrayAccess {..} |
-            Expr::Call {..} | Expr::PyCallback {..} | Expr::Convert {..} |
-            Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
+            Expr::UnOp {..} | Expr::BinOp {..} | Expr::Assign {..} |
+            Expr::IfExpr {..} | Expr::StructFieldAccess {..} |
+            Expr::ArrayAccess {..} | Expr::Call {..} | Expr::PyCallback {..} |
+            Expr::Convert {..} | Expr::Struct {..} | Expr::ThreadIdx {..} |
+            Expr::BlockIdx {..} => {
                 self.sfold(env, |env, e| e.fv(env))
             }
         }
@@ -89,9 +89,8 @@ impl FreeVars<Type> for Stmt {
             Stmt::AllocShared {elem_ty, id, ..} => {
                 bind_variable(env, &id, &elem_ty)
             },
-            Stmt::Assign {..} | Stmt::If {..} | Stmt::While {..} |
-            Stmt::Return {..} | Stmt::Scope {..} | Stmt::Expr {..} |
-            Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
+            Stmt::If {..} | Stmt::While {..} | Stmt::Return {..} | Stmt::Scope {..} |
+            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
             Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
             Stmt::AllocDevice {..} | Stmt::FreeDevice {..} |
             Stmt::CopyMemory {..} => {

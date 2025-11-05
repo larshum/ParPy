@@ -3,6 +3,7 @@ mod codegen;
 mod constant_fold;
 pub mod flatten_structs;
 mod free_vars;
+mod fuse_memory;
 mod global_mem;
 mod par;
 mod pprint;
@@ -13,6 +14,8 @@ mod unroll_loops;
 
 #[cfg(test)]
 pub mod ast_builder;
+#[cfg(test)]
+pub mod unsymbolize;
 
 use ast::*;
 use crate::option::CompileOptions;
@@ -47,17 +50,23 @@ pub fn from_general_ir(
     let ast = reduce::expand_parallel_reductions(opts, ast)?;
     debug_env.print("GPU AST after expanding reductions", &ast);
 
-    // Transform memory writes where multiple threads write to the same location so that only one
-    // thread writes and the threads are synchronized afterward.
-    let ast = global_mem::eliminate_block_wide_memory_writes(ast)?;
-    debug_env.print("GPU AST after eliminating block-wide memory writes", &ast);
-
     let ast = constant_fold::fold(ast);
+    debug_env.print("GPU AST after constant folding", &ast);
 
     // Unroll simple for-loops that contain a single statement and that do not perform more than a
     // fixed number of iterations in total, as determined via a compiler option.
     let ast = unroll_loops::apply(ast, opts);
     debug_env.print("GPU AST after unrolling for-loops", &ast);
+
+    // Attempts to fuse memory operations performed in the AST to reduce the memory bandwidth usage
+    // of a kernel.
+    let ast = fuse_memory::apply(ast)?;
+    debug_env.print("GPU AST after fusing memory operations", &ast);
+
+    // Transform memory writes where multiple threads write to the same location so that only one
+    // thread writes and the threads are synchronized afterward.
+    let ast = global_mem::eliminate_block_wide_memory_writes(ast)?;
+    debug_env.print("GPU AST after eliminating block-wide memory writes", &ast);
 
     // Eliminate redundant uses of synchronization. This includes repeated uses of synchronization
     // on the same scope and trailing synchronization at the end of a kernel.

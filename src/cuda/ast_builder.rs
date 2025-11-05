@@ -1,4 +1,5 @@
 use super::ast::*;
+use crate::utils::ast::ExprType;
 use crate::utils::info::*;
 use crate::utils::name::Name;
 
@@ -44,4 +45,16 @@ pub fn max(lhs: Expr, rhs: Expr, ty: Type) -> Expr {
 
 pub fn defn(ty: Type, id: Name, expr: Option<Expr>) -> Stmt {
     Stmt::Definition {ty, id, expr}
+}
+
+pub fn assign(dst: Expr, expr: Expr) -> Stmt {
+    let ty = expr.get_type().clone();
+    Stmt::Expr {
+        e: Expr::Assign {
+            lhs: Box::new(dst),
+            rhs: Box::new(expr),
+            ty,
+            i: Info::default()
+        }
+    }
 }
