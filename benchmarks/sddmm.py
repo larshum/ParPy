@@ -2,6 +2,8 @@ import ctypes
 import numpy as np
 import pandas as pd
 import parpy
+from parpy.builtin import convert
+from parpy.types import F32, I64
 import ssgetpy
 import subprocess
 import torch
@@ -37,7 +39,7 @@ def parpy_sddmm_csr_kernel(A, B, C, D, N, alpha, beta):
         row = C["rows"][i]
         col = C["cols"][i]
         t = parpy.reduce.sum(A[row, :] * B[:, col])
-        D[i] = alpha * t + beta * C["values"][i]
+        D[i] = convert(alpha, F32) * t + convert(beta, F32) * C["values"][i]
 
 def parpy_sddmm_csr(A, B, C):
     D = torch.empty_like(C)
@@ -56,6 +58,7 @@ def parpy_sddmm_csr(A, B, C):
         "nnz": parpy.threads(nnz),
     }
     opts = parpy.par(p)
+    opts.force_int_size = I64
     parpy_sddmm_csr_kernel(A, B, C_dict, D.values(), N, alpha, beta, opts=opts)
     return D
 
@@ -66,7 +69,7 @@ def parpy_sddmm_coo_kernel(A, B, C, D, alpha, beta):
         row = C["rows"][i]
         col = C["cols"][i]
         t = parpy.reduce.sum(A[row, :] * B[:, col])
-        D[i] = alpha * t + beta * C["values"][i]
+        D[i] = convert(alpha, F32) * t + convert(beta, F32) * C["values"][i]
 
 def parpy_sddmm_coo(A, B, C, C_rows):
     D = C.detach().clone()
@@ -79,6 +82,7 @@ def parpy_sddmm_coo(A, B, C, C_rows):
         "nnz": nnz
     }
     opts = parpy.par({"nnz": parpy.threads(nnz)})
+    opts.force_int_size = I64
     parpy_sddmm_coo_kernel(A, B, C_dict, D.values(), alpha, beta, opts=opts)
     return D
 
