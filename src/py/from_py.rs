@@ -856,8 +856,7 @@ fn convert_returns<'py>(
 ) -> PyResult<Type> {
     let returns = ast.getattr("returns")?;
     try_extract_type_annotation(returns, env, &i)
-        .or_else(|_| py_runtime_error!(i, "Unsupported return type annotation \
-                                           on external function"))
+        .or(Ok(Type::Void))
 }
 
 pub fn convert_callback<'py>(
