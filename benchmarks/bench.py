@@ -194,6 +194,7 @@ def produce_sddmm_output(csv_file, frameworks, k):
     axs.yaxis.grid(color="gray", which="minor", alpha=.2)
     axs.tick_params(axis="both", which="major", labelsize=16)
     axs.tick_params(axis="both", which="minor", labelsize=14)
+    axs.set_aspect(4)
 
     # Plot legend with each framework associated with a color
     for c, fw in zip(colors, frameworks):
