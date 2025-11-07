@@ -13,7 +13,7 @@ def sum_rows(x, out, N):
     parpy.label('outer')
     for i in range(N):
         parpy.label('inner')
-        out[i] = parpy.operators.sum(x[i,:])
+        out[i] = parpy.reduce.sum(x[i,:])
 
 def sum_rows_wrap(x, p):
     N, M = x.shape
@@ -162,4 +162,5 @@ axs.set_ylabel("Execution time (ms)", fontsize=16)
 axs.tick_params(axis='both', which='major', labelsize=16)
 axs.tick_params(axis='both', which='minor', labelsize=14)
 axs.legend(loc="upper left", fontsize=16)
+axs.set_aspect(0.6)
 fig.savefig(f"mot-ex-perf.pdf", bbox_inches="tight", pad_inches=0.05)
