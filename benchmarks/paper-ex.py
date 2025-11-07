@@ -18,7 +18,9 @@ def sum_rows(x, out, N):
 def sum_rows_wrap(x, p):
     N, M = x.shape
     y = torch.zeros(N, dtype=torch.float32, device='cuda')
-    sum_rows(x, y, N, opts=parpy.par(p))
+    opts = parpy.par(p)
+    opts.force_int_size = parpy.types.I64
+    sum_rows(x, y, N, opts=opts)
     return y
 
 def print_sum_rows(args, p):
