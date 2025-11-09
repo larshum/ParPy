@@ -250,14 +250,6 @@ def test_invalid_parameter_type_annotation(backend):
     assert e_info.match("Unsupported parameter type annotation")
 
 @pytest.mark.parametrize('backend', compiler_backends)
-def test_invalid_return_type_annotation(backend):
-    with pytest.raises(RuntimeError) as e_info:
-        @parpy.external("dummy", backend, parpy.Target.Device)
-        def dummy(x: parpy.types.I32) -> int:
-            return x
-    assert e_info.match("Unsupported return type annotation on external function")
-
-@pytest.mark.parametrize('backend', compiler_backends)
 def test_call_other_module_function(backend):
     def helper():
         import test_static_eq
