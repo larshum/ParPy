@@ -480,7 +480,7 @@ pub enum Stmt {
     Definition {ty: Type, id: Name, expr: Expr, labels: Vec<String>, i: Info},
     Assign {dst: Expr, expr: Expr, labels: Vec<String>, i: Info},
     For {
-        var: Name, lo: Expr, hi: Expr, step: i64, body: Vec<Stmt>,
+        var: Name, lo: Expr, hi: Expr, step: Expr, body: Vec<Stmt>,
         labels: Vec<String>, i: Info
     },
     While {cond: Expr, body: Vec<Stmt>, i: Info},
@@ -524,6 +524,7 @@ impl SMapAccum<Expr> for Stmt {
             Stmt::For {var, lo, hi, step, body, labels, i} => {
                 let (acc, lo) = f(acc?, lo)?;
                 let (acc, hi) = f(acc, hi)?;
+                let (acc, step) = f(acc, step)?;
                 Ok((acc, Stmt::For {var, lo, hi, step, body, labels, i}))
             },
             Stmt::While {cond, body, i} => {
@@ -558,7 +559,7 @@ impl SFold<Expr> for Stmt {
         match self {
             Stmt::Definition {expr, ..} => f(acc?, expr),
             Stmt::Assign {dst, expr, ..} => f(f(acc?, dst)?, expr),
-            Stmt::For {lo, hi, ..} => f(f(acc?, lo)?, hi),
+            Stmt::For {lo, hi, step, ..} => f(f(f(acc?, lo)?, hi)?, step),
             Stmt::While {cond, ..} => f(acc?, cond),
             Stmt::If {cond, ..} => f(acc?, cond),
             Stmt::Return {value, ..} => f(acc?, value),

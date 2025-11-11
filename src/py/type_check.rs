@@ -922,9 +922,11 @@ impl TypeCheck for Stmt {
             Stmt::For {var, lo, hi, step, body, labels, i} => {
                 let (env, lo) = lo.type_check(env)?;
                 let (env, hi) = hi.type_check(env)?;
+                let (env, step) = step.type_check(env)?;
                 let int_ty = Type::fixed_scalar(env.scalar_sizes.int.clone());
                 let lo = coerce_type(lo, &int_ty)?;
                 let hi = coerce_type(hi, &int_ty)?;
+                let step = coerce_type(step, &int_ty)?;
                 let env = env.insert_var(&var, &int_ty)?;
                 let (env, body) = body.type_check(env)?;
                 Ok((env, Stmt::For {var, lo, hi, step, body, labels, i}))

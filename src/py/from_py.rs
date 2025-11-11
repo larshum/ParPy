@@ -561,25 +561,6 @@ fn convert_expr<'py, 'a>(
     }
 }
 
-fn extract_step(e: Expr) -> PyResult<i64> {
-    let fail = || {
-        py_runtime_error!(e.get_info(), "Range step size must be an integer literal")
-    };
-    let fail_zero = |i: &Info| {
-        py_runtime_error!(i, "Range step size must be non-zero")
-    };
-    match &e {
-        Expr::Int {v, ..} if *v != 0 => Ok(*v as i64),
-        Expr::UnOp {op: UnOp::Sub, arg, ..} => match arg.as_ref() {
-            Expr::Int {v, ..} if *v != 0 => Ok(-*v as i64),
-            Expr::Int {i, ..} => fail_zero(&i),
-            _ => fail()
-        },
-        Expr::Int {i, ..} => fail_zero(&i),
-        _ => fail()
-    }
-}
-
 fn construct_expr_stmt(
     value: Expr,
     i: &Info
@@ -590,6 +571,15 @@ fn construct_expr_stmt(
             Ok(Stmt::Expr {e: value, i: i.clone()})
         },
         _ => py_runtime_error!(i, "Unsupported expression statement")
+    }
+}
+
+fn ensure_non_zero_step_size(e: &Expr) -> PyResult<()> {
+    match e {
+        Expr::Int {v, i, ..} if *v == 0 => {
+            py_runtime_error!(i, "For-loop step size must be non-zero")
+        },
+        _ => Ok(())
     }
 }
 
@@ -633,17 +623,18 @@ fn convert_stmt<'py, 'a>(
             1 => {
                 let lo = Expr::Int {v: 0, ty: Type::Unknown, i: i.clone()};
                 let hi = convert_expr(range_args.get_item(0)?, env)?;
-                Ok((lo, hi, 1))
+                Ok((lo, hi, Expr::Int {v: 1, ty: Type::Unknown, i: i.clone()}))
             },
             2 => {
                 let lo = convert_expr(range_args.get_item(0)?, env)?;
                 let hi = convert_expr(range_args.get_item(1)?, env)?;
-                Ok((lo, hi, 1))
+                Ok((lo, hi, Expr::Int {v: 1, ty: Type::Unknown, i: i.clone()}))
             },
             3 => {
                 let lo = convert_expr(range_args.get_item(0)?, env)?;
                 let hi = convert_expr(range_args.get_item(1)?, env)?;
-                let step = extract_step(convert_expr(range_args.get_item(2)?, env)?)?;
+                let step = convert_expr(range_args.get_item(2)?, env)?;
+                ensure_non_zero_step_size(&step)?;
                 Ok((lo, hi, step))
             }
             _ => py_runtime_error!(i, "Invalid number of arguments passed to range")
@@ -1661,7 +1652,7 @@ mod test {
             var: id("i"),
             lo: Expr::Int {v: 1, ty: Type::Unknown, i: mkinfo(1, 15, 1, 16)},
             hi: Expr::Int {v: 10, ty: Type::Unknown, i: mkinfo(1, 18, 1, 20)},
-            step: 1,
+            step: Expr::Int {v: 1, ty: Type::Unknown, i: Info::default()},
             body: vec![
                 Stmt::Assign {
                     dst: Expr::Subscript {
@@ -1699,7 +1690,12 @@ mod test {
             var: id("i"),
             lo: Expr::Int {v: 10, ty: Type::Unknown, i: mkinfo(1, 15, 1, 17)},
             hi: Expr::Int {v: 1, ty: Type::Unknown, i: mkinfo(1, 19, 1, 20)},
-            step: -2,
+            step: Expr::UnOp {
+                op: UnOp::Sub,
+                arg: Box::new(Expr::Int {v: 2, ty: Type::Unknown, i: mkinfo(1, 22, 1, 23)}),
+                ty: Type::Unknown,
+                i: mkinfo(1, 22, 1, 24)
+            },
             body: vec![
                 Stmt::Assign {
                     dst: Expr::Subscript {

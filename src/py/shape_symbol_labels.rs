@@ -190,7 +190,7 @@ mod test {
             var: id("i"),
             lo: Expr::Var {id: n.clone(), ty: tyuk(), i: i()},
             hi: Expr::Var {id: m.clone(), ty: tyuk(), i: i()},
-            step: 1,
+            step: int(1, None),
             body: vec![],
             labels: vec![],
             i: i()
@@ -215,7 +215,7 @@ mod test {
                 int(1, None),
                 tyuk()
             ),
-            step: 1,
+            step: int(1, None),
             body: vec![],
             labels: vec![],
             i: i()
@@ -224,7 +224,7 @@ mod test {
             var: id("i"),
             lo: int(1, None),
             hi: int(10, None),
-            step: 1,
+            step: int(1, None),
             body: vec![inner_loop],
             labels: vec![],
             i: i()

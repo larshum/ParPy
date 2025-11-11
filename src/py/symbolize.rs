@@ -160,6 +160,7 @@ impl Symbolize for Stmt {
                 let (body_env, var) = env.clone().set_symbol(var);
                 let (body_env, lo) = lo.symbolize(body_env)?;
                 let (body_env, hi) = hi.symbolize(body_env)?;
+                let (body_env, step) = step.symbolize(body_env)?;
                 let (_, body) = body.symbolize(body_env)?;
                 Ok((env, Stmt::For {var, lo, hi, step, body, labels, i}))
             },
@@ -378,7 +379,7 @@ mod test {
             var: x.clone(),
             lo: int(0, Some(ElemSize::I64)),
             hi: int(10, Some(ElemSize::I64)),
-            step: 1,
+            step: int(1, Some(ElemSize::I64)),
             body: vec![Stmt::Assign {
                 dst: nvar(&y), expr: nvar(&x), labels: vec![], i: i.clone()
             }],

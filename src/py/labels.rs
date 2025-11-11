@@ -114,13 +114,13 @@ mod test {
         let body = vec![
             label("x"),
             Stmt::For {
-                var: x.clone(), lo: int(1), hi: int(7), step: 2, body: vec![],
+                var: x.clone(), lo: int(1), hi: int(7), step: int(2), body: vec![],
                 labels: vec![], i: i()
             }
         ];
         let res = associate_labels_stmts(body).unwrap();
         assert_eq!(res, vec![Stmt::For {
-            var: x, lo: int(1), hi: int(7), step: 2, body: vec![],
+            var: x, lo: int(1), hi: int(7), step: int(2), body: vec![],
             labels: vec!["x".to_string()], i: i()
         }]);
     }
@@ -130,12 +130,12 @@ mod test {
         let x = Name::sym_str("x");
         let y = Name::sym_str("y");
         let inner_for = |l| Stmt::For {
-            var: y.clone(), lo: int(1), hi: int(10), step: 1, body: vec![],
+            var: y.clone(), lo: int(1), hi: int(10), step: int(1), body: vec![],
             labels: l, i: i()
         };
         let body = vec![
             Stmt::For {
-                var: x.clone(), lo: int(1), hi: int(7), step: 1, body: vec![
+                var: x.clone(), lo: int(1), hi: int(7), step: int(1), body: vec![
                     label("i"),
                     inner_for(vec![])
                 ],
@@ -144,7 +144,7 @@ mod test {
         ];
         let res = associate_labels_stmts(body).unwrap();
         assert_eq!(res, vec![Stmt::For {
-            var: x.clone(), lo: int(1), hi: int(7), step: 1,
+            var: x.clone(), lo: int(1), hi: int(7), step: int(1),
             body: vec![inner_for(vec!["i".to_string()])],
             labels: vec![], i: i()
         }]);
