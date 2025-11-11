@@ -57,4 +57,4 @@ def test_zero_step_fails():
         def zero_step(x, N):
             for i in range(0, N, 0):
                 x[i] = i
-    assert e_info.match(r"Range step size must be non-zero")
+    assert e_info.match(r"step size must be non-zero")

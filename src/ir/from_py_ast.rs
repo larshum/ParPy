@@ -311,6 +311,20 @@ fn to_ir_expr(
     }
 }
 
+fn extract_step_value(step: py_ast::Expr) -> CompileResult<i64> {
+    let i = step.get_info();
+    match step {
+        py_ast::Expr::Int {v, i, ..} => {
+            if v != 0 {
+                Ok(v as i64)
+            } else {
+                parpy_compile_error!(i, "For-loop step size must be non-zero")
+            }
+        },
+        _ => parpy_compile_error!(i, "For-loop must have a statically known step size.")
+    }
+}
+
 fn lookup_labels(
     par: &BTreeMap<String, LoopPar>,
     labels: Vec<String>,
@@ -352,6 +366,7 @@ fn to_ir_stmt(
         py_ast::Stmt::For {var, lo, hi, step, body, labels, i} => {
             let lo = to_ir_expr(env, lo)?;
             let hi = to_ir_expr(env, hi)?;
+            let step = extract_step_value(step)?;
             let body = to_ir_stmts(env, body)?;
             let par = lookup_labels(&env.par_labels, labels, &i)?;
             Ok(Stmt::For {var, lo, hi, step, body, par, i})

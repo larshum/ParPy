@@ -94,7 +94,7 @@ mod test {
             var: id("x"),
             lo: int(0, None),
             hi: int(10, None),
-            step: 1,
+            step: int(1, None),
             body: vec![],
             labels: vec!["x".to_string()],
             i: Info::default()

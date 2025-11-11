@@ -345,7 +345,7 @@ fn generate_reduction_loop(
         var: reduce_id,
         lo: mk_int(0, scalar_sizes, &i),
         hi: mk_int(niters, scalar_sizes, &i),
-        step: 1,
+        step: mk_int(1, scalar_sizes, &i),
         body: vec![inner_stmt],
         labels: l,
         i: i.clone()
@@ -377,7 +377,7 @@ fn generate_mapping_loops(
             var: id,
             lo: mk_int(0, scalar_sizes, &i),
             hi: mk_int(shape as i128, scalar_sizes, &i),
-            step: 1,
+            step: mk_int(1, scalar_sizes, &i),
             body: vec![stmt],
             labels: for_label,
             i: i.clone()

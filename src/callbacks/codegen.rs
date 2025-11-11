@@ -94,7 +94,19 @@ fn gpu_ast_to_py_stmt(s: gpu_ast::Stmt) -> CompileResult<py_ast::Stmt> {
             let body = body.into_iter()
                 .map(|s| gpu_ast_to_py_stmt(s))
                 .collect::<CompileResult<Vec<py_ast::Stmt>>>()?;
-            Ok(py_ast::Stmt::For {var, lo, hi, step, body, labels: vec![], i})
+            Ok(py_ast::Stmt::For {
+                var,
+                lo,
+                hi,
+                step: py_ast::Expr::Int {
+                    v: step as i128,
+                    ty: py_ast::Type::Unknown,
+                    i: i.clone()
+                },
+                body,
+                labels: vec![],
+                i
+            })
         },
         gpu_ast::Stmt::Expr {e: gpu_ast::Expr::PyCallback {id, args, i, ..}, i: stmt_i} => {
             Ok(py_ast::Stmt::Expr {
