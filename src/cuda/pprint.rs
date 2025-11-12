@@ -431,6 +431,10 @@ impl PrettyPrint for Stmt {
                 let (env, id) = id.pprint(env);
                 (env, format!("{indent}__shared__ {ty} {id}[{sz}];"))
             },
+            Stmt::BuiltinAssume {e} => {
+                let (env, e) = e.pprint(env);
+                (env, format!("{indent}__builtin_assume({e});"))
+            },
             Stmt::CheckError {e} => {
                 let (env, e) = e.pprint(env);
                 (env, format!("{indent}parpy_cuda_check_error({e});"))

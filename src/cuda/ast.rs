@@ -296,6 +296,7 @@ pub enum Stmt {
         id: Name, blocks: Dim3, threads: Dim3, stream: Stream, args: Vec<Expr>
     },
     AllocShared {ty: Type, id: Name, sz: usize},
+    BuiltinAssume {e: Expr},
     CheckError {e: Expr},
 }
 
@@ -339,6 +340,10 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, args) = args.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::KernelLaunch {id, blocks, threads, args, stream}))
             },
+            Stmt::BuiltinAssume {e} => {
+                let (acc, e) = f(acc?, e)?;
+                Ok((acc, Stmt::BuiltinAssume {e}))
+            },
             Stmt::CheckError {e} => {
                 let (acc, e) = f(acc?, e)?;
                 Ok((acc, Stmt::CheckError {e}))
@@ -365,6 +370,7 @@ impl SFold<Expr> for Stmt {
             Stmt::Return {value, ..} => f(acc?, value),
             Stmt::Expr {e, ..} => f(acc?, e),
             Stmt::KernelLaunch {args, ..} => args.sfold_result(acc, &f),
+            Stmt::BuiltinAssume {e} => f(acc?, e),
             Stmt::CheckError {e} => f(acc?, e),
             Stmt::AllocShared {..} | Stmt::Synchronize {..} => acc
         }
@@ -393,7 +399,8 @@ impl SMapAccum<Stmt> for Stmt {
             },
             Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
             Stmt::AllocShared {..} | Stmt::Synchronize {..} |
-            Stmt::KernelLaunch {..} | Stmt::CheckError {..} => Ok((acc?, self))
+            Stmt::KernelLaunch {..} | Stmt::BuiltinAssume {..} |
+            Stmt::CheckError {..} => Ok((acc?, self))
         }
     }
 }
@@ -410,7 +417,8 @@ impl SFold<Stmt> for Stmt {
             Stmt::While {body, ..} => body.sfold_result(acc, &f),
             Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
             Stmt::AllocShared {..} | Stmt::Synchronize {..} |
-            Stmt::KernelLaunch {..} | Stmt::CheckError {..} => acc
+            Stmt::KernelLaunch {..} | Stmt::BuiltinAssume {..} |
+            Stmt::CheckError {..} => acc
         }
     }
 }
@@ -435,9 +443,10 @@ impl SFlatten<Stmt> for Stmt {
                 let body = body.sflatten_result(vec![], &f)?;
                 acc.push(Stmt::While {cond, body});
             },
-            Stmt::Definition {..} | Stmt::Return {..} |
-            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::KernelLaunch {..} |
-            Stmt::AllocShared {..} | Stmt::CheckError {..} => {
+            Stmt::Definition {..} | Stmt::Return {..} | Stmt::Expr {..} |
+            Stmt::Synchronize {..} | Stmt::KernelLaunch {..} |
+            Stmt::AllocShared {..} | Stmt::BuiltinAssume {..} |
+            Stmt::CheckError {..} => {
                 acc.push(self);
             }
         };

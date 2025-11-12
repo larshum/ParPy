@@ -7,6 +7,7 @@ mod graphs;
 mod memory;
 mod pprint;
 mod reduce;
+mod thread_hint;
 
 #[cfg(test)]
 mod ast_builder;
@@ -40,6 +41,11 @@ pub fn codegen(
     // Add an attribute to the kernels for which we use a non-standard amount of thread blocks per
     // cluster (currently, only up to 8 blocks are supported by default).
     let cuda_ast = clusters::insert_attribute_for_nonstandard_blocks_per_cluster(cuda_ast, opts);
+
+    // Insert hints about the number of threads each kernel is using, via the '__builtin_assume'
+    // construct. This informs the CUDA compiler that it may assume we have no more than a certain
+    // number of threads, which may help it generate more efficient code.
+    let cuda_ast = thread_hint::insert_thread_hints(cuda_ast);
 
     Ok(error::add_error_handling(cuda_ast))
 }
