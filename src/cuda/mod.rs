@@ -4,6 +4,7 @@ mod codegen;
 mod error;
 mod escape_function_names;
 mod graphs;
+mod insert_stream_argument;
 mod memory;
 mod pprint;
 mod reduce;
@@ -33,6 +34,10 @@ pub fn codegen(
     // Adds a prefix to the names of all called functions and their definitions to avoid naming
     // collisions with existing functions.
     let cuda_ast = escape_function_names::apply(cuda_ast);
+
+    // Inserts a stream argument to all entry points, and uses this stream in place of the default
+    // stream.
+    let cuda_ast = insert_stream_argument::apply(cuda_ast);
 
     // Update all kernel entry points to make use of CUDA graphs.
     let cuda_ast = graphs::use_if_enabled(cuda_ast, opts);
