@@ -325,3 +325,32 @@ def test_odd_entries_multiblock(backend):
         }
         odd_entries_wrap(backend, p)
     run_if_backend_is_enabled(backend, helper)
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_reduce_mixed_parallel_loops(backend):
+    def helper():
+        @parpy.jit
+        def softmax_mixed_parallelism(x, out, nrows, ncols):
+            parpy.label('outer')
+            for i in range(nrows):
+                m = parpy.builtin.convert(0.0, parpy.types.F32)
+                for j in range(ncols):
+                    m = parpy.builtin.maximum(m, x[i, j])
+                parpy.label('inner_map')
+                out[i, :] = parpy.math.exp(x[i, :] - m)
+                s = parpy.builtin.convert(0.0, parpy.types.F32)
+                for j in range(ncols):
+                    s = s + out[i, j]
+                parpy.label('inner_map')
+                out[i, :] /= s
+        nrows = 10
+        ncols = 52
+        x = torch.randn(nrows, ncols, dtype=torch.float32)
+        out = torch.empty_like(x)
+        opts = par_opts(backend, {
+            'outer': parpy.threads(nrows),
+            'inner_map': parpy.threads(32),
+        })
+        softmax_mixed_parallelism(x, out, nrows, ncols, opts=opts)
+        assert torch.allclose(out, torch.softmax(x, axis=1), atol=1e-5)
+    run_if_backend_is_enabled(backend, helper)
