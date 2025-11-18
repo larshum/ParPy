@@ -25,17 +25,24 @@ fn extract_integer(e: &Expr) -> Option<i128> {
     }
 }
 
+fn apply_op(op: &BinOp, l: i128, r: i128) -> Option<i128> {
+    match op {
+        BinOp::Add => Some(l + r),
+        BinOp::Mul => Some(l * r),
+        _ => None
+    }
+}
+
 fn lower_bound_of_first_thread(init: &Expr) -> Option<i128> {
     match init {
-        Expr::BinOp {lhs, op: BinOp::Add, rhs, ..} => {
-            match rhs.as_ref() {
-                Expr::ThreadIdx {dim: Dim::X, ..} => extract_integer(lhs),
-                _ => None
-            }
+        Expr::ThreadIdx {..} | Expr::BlockIdx {..} => Some(0),
+        Expr::BinOp {lhs, op, rhs, ..} => {
+            lower_bound_of_first_thread(&lhs)
+                .zip(lower_bound_of_first_thread(&rhs))
+                .and_then(|(l, r)| apply_op(op, l, r))
         },
-        Expr::ThreadIdx {dim: Dim::X, ..} => Some(0),
         Expr::Convert {e, ..} => lower_bound_of_first_thread(e),
-        _ => None
+        _ => extract_integer(init)
     }
 }
 
@@ -64,41 +71,32 @@ fn extract_step_size(var: &Name, incr: &Expr) -> Option<i128> {
 }
 
 fn unroll_stmt(
-    id: Name,
-    lo: i128,
+    li: &LoopInfo,
     hi: i128,
     num_threads: i128,
-    stmt: Stmt,
-    ty: &Type,
-    i: &Info
+    stmt: Stmt
 ) -> Vec<Stmt> {
-    let thread_idx_plus_offset = |ofs| {
-        let thread_expr = Expr::Convert {
-            e: Box::new(Expr::ThreadIdx {
-                dim: Dim::X, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
-            }),
-            ty: ty.clone()
-        };
+    let init_plus_offset = |ofs| {
         if ofs == 0 {
-            thread_expr
+            li.init.clone()
         } else {
             Expr::BinOp {
-                lhs: Box::new(thread_expr),
+                lhs: Box::new(li.init.clone()),
                 op: BinOp::Add,
-                rhs: Box::new(Expr::Int {v: ofs, ty: ty.clone(), i: i.clone()}),
-                ty: ty.clone(),
-                i: i.clone()
+                rhs: Box::new(Expr::Int {v: ofs, ty: li.var_ty.clone(), i: li.i.clone()}),
+                ty: li.var_ty.clone(),
+                i: li.i.clone()
             }
         }
     };
     let mk_sub_env = |ofs| {
-        let sub_expr = thread_idx_plus_offset(ofs);
+        let sub_expr = init_plus_offset(ofs);
         let mut sub_env = BTreeMap::new();
-        sub_env.insert(id.clone(), sub_expr);
+        sub_env.insert(li.var.clone(), sub_expr);
         sub_env
     };
     let mut acc = vec![];
-    let mut ofs = lo;
+    let mut ofs = 0;
     while ofs + num_threads <= hi {
         let sub_env = mk_sub_env(ofs);
         acc.push(stmt.clone().sub_vars(&sub_env));
@@ -114,53 +112,47 @@ fn unroll_stmt(
             Stmt::Expr {e: e @ Expr::Assign {..}, ..} => {
                 let els_expr = Expr::Convert {
                     e: Box::new(Expr::Int {
-                        v: 0, ty: Type::Scalar {sz: ElemSize::I32}, i: i.clone()
+                        v: 0, ty: Type::Scalar {sz: ElemSize::I32}, i: li.i.clone()
                     }),
                     ty: Type::Void
                 };
                 let ternary_stmt = Stmt::Expr {
                     e: Expr::IfExpr {
                         cond: Box::new(Expr::BinOp {
-                            lhs: Box::new(Expr::ThreadIdx {
-                                dim: Dim::X,
-                                ty: Type::Scalar {sz: ElemSize::U32},
-                                i: i.clone()
-                            }),
+                            lhs: Box::new(li.init.clone()),
                             op: BinOp::Lt,
                             rhs: Box::new(Expr::Int {
-                                v: max_thread_idx, ty: ty.clone(), i: i.clone()
+                                v: max_thread_idx, ty: li.var_ty.clone(), i: li.i.clone()
                             }),
-                            ty: ty.clone(),
-                            i: i.clone()
+                            ty: li.var_ty.clone(),
+                            i: li.i.clone()
                         }),
                         thn: Box::new(Expr::Convert {
                             e: Box::new(e.sub_vars(&sub_env)),
                             ty: Type::Void
                         }),
                         els: Box::new(els_expr),
-                        ty: ty.clone(),
-                        i: i.clone()
+                        ty: li.var_ty.clone(),
+                        i: li.i.clone()
                     },
-                    i: i.clone()
+                    i: li.i.clone()
                 };
                 acc.push(ternary_stmt);
             },
             _ => {
                 let cond_stmt = Stmt::If {
                     cond: Expr::BinOp {
-                        lhs: Box::new(Expr::ThreadIdx {
-                            dim: Dim::X, ty: Type::Scalar {sz: ElemSize::U32}, i: i.clone()
-                        }),
+                        lhs: Box::new(li.init.clone()),
                         op: BinOp::Lt,
                         rhs: Box::new(Expr::Int {
-                            v: max_thread_idx, ty: ty.clone(), i: i.clone()
+                            v: max_thread_idx, ty: li.var_ty.clone(), i: li.i.clone()
                         }),
-                        ty: ty.clone(),
-                        i: i.clone()
+                        ty: li.var_ty.clone(),
+                        i: li.i.clone()
                     },
                     thn: vec![stmt.sub_vars(&sub_env)],
                     els: vec![],
-                    i: i.clone()
+                    i: li.i.clone()
                 };
                 acc.push(cond_stmt);
             }
@@ -173,14 +165,21 @@ fn try_unroll_loop(
     mut li: LoopInfo,
     opts: &CompileOptions
 ) -> Option<Vec<Stmt>> {
-    if li.body.len() == 1 {
-        let lo = lower_bound_of_first_thread(&li.init)?;
-        let hi = upper_bound_value(&li.var, &li.cond)?;
-        let num_threads = extract_step_size(&li.var, &li.incr)?;
+    let lo = lower_bound_of_first_thread(&li.init)?;
+    let hi = upper_bound_value(&li.var, &li.cond)?;
+    let num_threads = extract_step_size(&li.var, &li.incr)?;
+    if hi-lo == num_threads {
+        let body = li.body.drain(..).collect::<Vec<_>>();
+        let body = body.into_iter()
+            .map(|s| unroll_stmt(&li, hi, num_threads, s))
+            .flatten()
+            .collect::<Vec<Stmt>>();
+        Some(body)
+    } else if li.body.len() == 1 {
         let niters = ((hi - lo) + num_threads - 1) / num_threads;
         if niters <= opts.max_unroll_count as i128 {
             let stmt = li.body.pop().unwrap();
-            Some(unroll_stmt(li.var, lo, hi, num_threads, stmt, &li.var_ty, &li.i))
+            Some(unroll_stmt(&li, hi, num_threads, stmt))
         } else {
             None
         }
@@ -202,7 +201,11 @@ fn unroll_loops_stmt(mut acc: Vec<Stmt>, s: Stmt, opts: &CompileOptions) -> Vec<
                 i: i.clone()
             };
             match try_unroll_loop(li, &opts) {
-                Some(mut unrolled_body) => acc.append(&mut unrolled_body),
+                Some(unrolled_body) => {
+                    let mut body = unrolled_body
+                        .sflatten(vec![], |acc, s| unroll_loops_stmt(acc, s, &opts));
+                    acc.append(&mut body)
+                },
                 None => {
                     let body = body.sflatten(vec![], |acc, s| {
                         unroll_loops_stmt(acc, s, &opts)
