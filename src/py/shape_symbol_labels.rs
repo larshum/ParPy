@@ -34,26 +34,34 @@ fn collect_shape_variables(acc: BTreeSet<Name>, p: &Param) -> BTreeSet<Name> {
     collect_shape_variables_type(acc, &p.ty)
 }
 
-fn insert_implicit_labels(
+fn collect_implicit_labels_helper(
     shape_vars: &BTreeSet<Name>,
-    mut labels: Vec<String>,
+    mut labels: BTreeSet<String>,
     e: &Expr
-) -> Vec<String> {
+) -> BTreeSet<String> {
     match e {
         Expr::Var {id, ..} if shape_vars.contains(id) => {
-            labels.push(id.get_str().clone());
+            labels.insert(id.get_str().clone());
             labels
         },
-        _ => e.sfold(labels, |labels, e| insert_implicit_labels(shape_vars, labels, e))
+        _ => e.sfold(labels, |labels, e| {
+            collect_implicit_labels_helper(shape_vars, labels, e)
+        })
     }
+}
+
+fn collect_implicit_labels(shape_vars: &BTreeSet<Name>, e: &Expr) -> Vec<String> {
+    let l = collect_implicit_labels_helper(shape_vars, BTreeSet::new(), e);
+    l.into_iter().collect::<Vec<String>>()
 }
 
 fn add_implicit_labels_stmt(
     shape_vars: &BTreeSet<Name>,
     s: Stmt
 ) -> Stmt {
-    let add_implicit_labels = |labels: Vec<String>, e: &Expr| -> Vec<String> {
-        insert_implicit_labels(shape_vars, labels, e)
+    let add_implicit_labels = |mut labels: Vec<String>, e: &Expr| -> Vec<String> {
+        labels.append(&mut collect_implicit_labels(&shape_vars, e));
+        labels
     };
     match s {
         Stmt::Definition {ty, id, expr, labels, i} => {
@@ -240,5 +248,32 @@ mod test {
         } else {
             assert!(false);
         }
+    }
+
+    #[test]
+    fn collect_no_duplicated_labels() {
+        let n = Name::sym_str("N");
+        let shape_vars = mk_shape_vars(vec![n.clone()]);
+        let v = Expr::Var {id: n, ty: tyuk(), i: i()};
+        let idx_expr = Expr::Tuple {
+            elems: vec![
+                Expr::Slice {
+                    lo: None,
+                    hi: Some(Box::new(v.clone())),
+                    ty: tyuk(),
+                    i: i()
+                },
+                Expr::Slice {
+                    lo: None,
+                    hi: Some(Box::new(v)),
+                    ty: tyuk(),
+                    i: i()
+                },
+            ],
+            ty: tyuk(),
+            i: i()
+        };
+        let labels = collect_implicit_labels(&shape_vars, &idx_expr);
+        assert_eq!(labels, vec!["N".to_string()]);
     }
 }
