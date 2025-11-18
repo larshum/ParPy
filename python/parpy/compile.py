@@ -191,7 +191,7 @@ def add_stream_if_cuda_backend(args, opts):
 
 def get_string_wrapper(name, key, opts):
     import ctypes
-    from .parpy import ScalarSizes
+    from .parpy import CompileBackend, ScalarSizes
     libpath = _get_library_path(key)
     lib = ctypes.cdll.LoadLibrary(libpath)
     getattr(lib, name).restype = ctypes.c_int32
