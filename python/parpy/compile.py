@@ -178,6 +178,17 @@ def _check_status(lib, status):
         msg = lib.parpy_get_error_message()
         raise RuntimeError(f"{msg.decode('ascii')}")
 
+def add_stream_if_cuda_backend(args, opts):
+    from .parpy import CompileBackend
+    if opts.backend == CompileBackend.Cuda:
+        import ctypes
+        import torch
+        # TODO(larshum, 2025-11-18): We may want the ability to customize this
+        # to make it more flexible.
+        stream = torch.cuda.current_stream()
+        return args + [stream.cuda_stream]
+    return args
+
 def get_string_wrapper(name, key, opts):
     import ctypes
     from .parpy import ScalarSizes
@@ -187,17 +198,26 @@ def get_string_wrapper(name, key, opts):
     sizes = ScalarSizes(opts)
     def wrapper(*args):
         args = _expand_args(args)
-        getattr(lib, name).argtypes = [_get_ctype(sizes, arg) for arg in args]
+        if opts.backend == CompileBackend.Cuda:
+            getattr(lib, name).argtypes = \
+                [_get_ctype(sizes, arg) for arg in args] + [ctypes.c_void_p]
+        else:
+            getattr(lib, name).argtypes = [_get_ctype(sizes, arg) for arg in args]
         args = [_value_or_ptr(arg) for arg in args]
+        args = add_stream_if_cuda_backend(args, opts)
         _check_status(lib, getattr(lib, name)(*args))
     return wrapper
 
-def get_wrapper(name, key, argtypes, vars, callbacks):
+def get_wrapper(name, key, argtypes, vars, callbacks, opts):
+    from .parpy import CompileBackend
     import ctypes
     libpath = _get_library_path(key)
     lib = ctypes.cdll.LoadLibrary(libpath)
     getattr(lib, name).restype = ctypes.c_int32
-    getattr(lib, name).argtypes = argtypes
+    if opts.backend == CompileBackend.Cuda:
+        getattr(lib, name).argtypes = argtypes + [ctypes.c_void_p]
+    else:
+        getattr(lib, name).argtypes = argtypes
     def wrapper(*args):
         args = _expand_args(args)
         callback_argtypes = argtypes[len(argtypes)-len(callbacks):]
@@ -206,5 +226,6 @@ def get_wrapper(name, key, argtypes, vars, callbacks):
             zip(callbacks, callback_argtypes)
         ]
         args = [_value_or_ptr(arg) for arg in args] + callback_args
+        args = add_stream_if_cuda_backend(args, opts)
         _check_status(lib, getattr(lib, name)(*args))
     return wrapper

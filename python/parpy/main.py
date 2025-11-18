@@ -118,7 +118,7 @@ def _compile_function(qualified_name, ir_ast, args, vars, opts):
 
     # Return a wrapper function which ensures the arguments are correctly
     # passed to the exposed shared library function.
-    wrap_fn = get_wrapper(name, cache_key, argtypes, vars, callbacks)
+    wrap_fn = get_wrapper(name, cache_key, argtypes, vars, callbacks, opts)
     _fun_cache[fast_cache_key] = wrap_fn
     return wrap_fn
 
