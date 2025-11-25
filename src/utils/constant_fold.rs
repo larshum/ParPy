@@ -207,6 +207,7 @@ fn apply_float_float_binop<T, E: CFExpr<T>>(
         BinOp::Sub => Some(lv - rv),
         BinOp::Mul => Some(lv * rv),
         BinOp::Div => Some(lv / rv),
+        BinOp::Pow => Some(f64::powf(lv, rv)),
         BinOp::Max => Some(f64::max(lv, rv)),
         BinOp::Min => Some(f64::min(lv, rv)),
         _ => None
@@ -241,7 +242,43 @@ fn apply_float_bool_binop<T, E: CFExpr<T>>(
     }
 }
 
-pub fn constant_fold_binop<T: CFType, E: CFExpr<T>>(
+fn mk_multiply_chain<T: Clone, E: Clone + CFExpr<T>>(
+    lhs: E,
+    count: i64,
+    ty: T,
+    i: Info
+) -> E {
+    if count > 1 {
+        let rhs = mk_multiply_chain(lhs.clone(), count-1, ty.clone(), i.clone());
+        CFExpr::mk_binop(lhs, BinOp::Mul, rhs, ty, i)
+    } else {
+        lhs
+    }
+}
+
+fn apply_known_rhs<T: Clone, E: Clone + CFExpr<T>>(
+    lhs: E,
+    op: BinOp,
+    rhs: E,
+    ty: T,
+    i: Info
+) -> E {
+    // When the right-hand side of a pow operation is a non-negative integer, but the left-hand
+    // side is unknown, we rewrite it as a series of multiplications.
+    match op {
+        BinOp::Pow => {
+            let rhsv = rhs.get_float_value().unwrap();
+            if rhsv.trunc() == rhsv && rhsv >= 0.0 {
+                mk_multiply_chain(lhs, rhsv as i64, ty, i)
+            } else {
+                CFExpr::mk_binop(lhs, op, rhs, ty, i)
+            }
+        },
+        _ => CFExpr::mk_binop(lhs, op, rhs, ty, i)
+    }
+}
+
+pub fn constant_fold_binop<T: Clone + CFType, E: Clone + CFExpr<T>>(
     lhs: E,
     op: BinOp,
     rhs: E,
@@ -273,7 +310,13 @@ pub fn constant_fold_binop<T: CFType, E: CFExpr<T>>(
                 CFExpr::mk_binop(lhs, op, rhs, ty, i)
             }
         },
-        (None, Some(LitKind::Float)) if is_float_neutral_elem(&op, &rhs, true) => lhs,
+        (None, Some(LitKind::Float)) => {
+            if is_float_neutral_elem(&op, &rhs, true) {
+                lhs
+            } else {
+                apply_known_rhs(lhs, op, rhs, ty, i)
+            }
+        },
         (Some(LitKind::Float), None) if is_float_neutral_elem(&op, &lhs, false) => rhs,
         _ => CFExpr::mk_binop(lhs, op, rhs, ty, i)
     }
@@ -282,6 +325,7 @@ pub fn constant_fold_binop<T: CFType, E: CFExpr<T>>(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::test::*;
     use crate::py::ast::*;
     use crate::py::ast_builder::*;
 
@@ -480,6 +524,33 @@ mod test {
         assert_eq!(
             apply_float_bool_binop_h(float_lit(1.5), BinOp::Add, float_lit(2.5)),
             binop(float_lit(1.5), BinOp::Add, float_lit(2.5), Type::Unknown)
+        );
+    }
+
+    #[test]
+    fn apply_float_float_pow() {
+        assert_eq!(
+            apply_float_float_binop_h(float_lit(1.5), BinOp::Pow, float_lit(2.0)),
+            float_lit(2.25)
+        );
+    }
+
+    #[test]
+    fn apply_float_float_pow_known_int_rhs() {
+        assert_eq!(
+            apply_known_rhs(
+                var("x", scalar(ElemSize::F32)),
+                BinOp::Pow,
+                float_lit(2.0),
+                scalar(ElemSize::F32),
+                i()
+            ),
+            binop(
+                var("x", scalar(ElemSize::F32)),
+                BinOp::Mul,
+                var("x", scalar(ElemSize::F32)),
+                scalar(ElemSize::F32),
+            )
         );
     }
 }
