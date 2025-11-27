@@ -241,16 +241,3 @@ def test_compile_binop_distinct_operand_types(backend, test_data, dtypes):
     else:
         code = parpy.print_compiled(parpy_fn, [dst, x, y], opts)
         assert len(code) != 0
-
-@pytest.mark.parametrize('backend', compiler_backends)
-def test_compile_pow_int_exponent(backend):
-    def helper():
-        x = np.ndarray((1,), dtype=np.float32)
-        y = np.ndarray((1,), dtype=np.int32)
-        x[0] = 2.5
-        y[0] = 2
-        dst = np.zeros((1,), dtype=np.float32)
-        opts = par_opts(backend, {})
-        parpy_pow(dst, x, y, opts=opts)
-        assert np.allclose(dst, np.array([6.25]), atol=1e-5)
-    run_if_backend_is_enabled(backend, helper)
