@@ -2,7 +2,7 @@ use super::ast::*;
 use crate::option::CompileOptions;
 use crate::utils::info::Info;
 use crate::utils::name::Name;
-use crate::utils::smap::{SFlatten, SMapAccum};
+use crate::utils::smap::{SFlatten, SFold, SMapAccum};
 use crate::utils::substitute::SubVars;
 
 use std::collections::BTreeMap;
@@ -15,7 +15,6 @@ struct LoopInfo {
     cond: Expr,
     incr: Expr,
     body: Vec<Stmt>,
-    unroll: bool,
     i: Info
 }
 
@@ -174,6 +173,14 @@ fn unroll_body(
         .collect::<Vec<Stmt>>()
 }
 
+fn count_stmts(acc: i64, s: &Stmt) -> i64 {
+    s.sfold(acc+1, count_stmts)
+}
+
+fn count_stmts_body(body: &Vec<Stmt>) -> i64 {
+    body.iter().map(|s| count_stmts(0, s)).sum()
+}
+
 fn should_unroll_loop(
     li: &LoopInfo,
     opts: &CompileOptions,
@@ -186,9 +193,14 @@ fn should_unroll_loop(
     // 1. The loop runs exactly one iteration for all threads. In this case, we simply replace the
     //    for-loop by a definition corresponding to the initial value of the for-loop.
     // 2. The loop contains exactly one statement, and it contains no more iterations than the
-    //    globally specified limit (using the 'max_unroll_count' attribute).
+    //    globally specified limit (using the 'max_unroll_count' attribute). Note that we count the
+    //    number of statements recursively to avoid unrolling when the body is a single compound
+    //    statement (such as an if-statement).
+    //
+    // If the user explicitly asks for unrolling in other cases, we inform the underlying compiler
+    // about this instead of doing the unrolling ourselves.
     hi-lo == step_size ||
-    (li.body.len() == 1 && niters <= opts.max_unroll_count as i128)
+    (count_stmts_body(&li.body) == 1 && niters <= opts.max_unroll_count as i128)
 }
 
 fn try_unroll_loop(
@@ -216,7 +228,6 @@ fn unroll_loops_stmt(mut acc: Vec<Stmt>, s: Stmt, opts: &CompileOptions) -> Vec<
                 cond: cond.clone(),
                 incr: incr.clone(),
                 body: body.clone(),
-                unroll: unroll.clone(),
                 i: i.clone()
             };
             match try_unroll_loop(li, &opts) {
@@ -242,9 +253,7 @@ fn unroll_loops_stmt(mut acc: Vec<Stmt>, s: Stmt, opts: &CompileOptions) -> Vec<
 
 fn unroll_loops_top(t: Top, opts: &CompileOptions) -> Top {
     match t {
-        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => {
-            t
-        },
+        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => t,
         Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = body.sflatten(vec![], |acc, s| unroll_loops_stmt(acc, s, &opts));
             Top::KernelFunDef {attrs, id, params, body, i}
@@ -254,4 +263,33 @@ fn unroll_loops_top(t: Top, opts: &CompileOptions) -> Top {
 
 pub fn apply(ast: Ast, opts: &CompileOptions) -> Ast {
     ast.smap(|t| unroll_loops_top(t, &opts))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::gpu::ast_builder::*;
+    use crate::test::*;
+
+    #[test]
+    fn for_loop_containing_non_empty_if_not_unrolled() {
+        let x = id("x");
+        let body = if_stmt(
+            bool_expr(true),
+            vec![assign(var("y", scalar(ElemSize::I64)), int(1, Some(ElemSize::I64)))],
+            vec![assign(var("y", scalar(ElemSize::I64)), int(2, Some(ElemSize::I64)))]
+        );
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: x.clone(),
+            init: int(0, Some(ElemSize::I64)),
+            cond: binop(var("x", scalar(ElemSize::I64)), BinOp::Lt, int(10, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(var("x", scalar(ElemSize::I64)), BinOp::Add, int(1, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![body],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        assert_eq!(unroll_loops_stmt(vec![], s.clone(), &opts), vec![s]);
+    }
 }
