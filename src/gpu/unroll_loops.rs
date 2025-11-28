@@ -187,13 +187,8 @@ fn should_unroll_loop(
     //    for-loop by a definition corresponding to the initial value of the for-loop.
     // 2. The loop contains exactly one statement, and it contains no more iterations than the
     //    globally specified limit (using the 'max_unroll_count' attribute).
-    // 3. The loop has been explicitly annotated with the 'unroll' attribute. In this case,
-    //    applicable loops (for which we know the lower-bound, upper-bound, and step size) will be
-    //    unrolled regardless of how many iterations they involve. Otherwise, if they are not
-    //    applicable, the generated code will request the native compiler to do unrolling for us.
     hi-lo == step_size ||
-    (li.body.len() == 1 && niters <= opts.max_unroll_count as i128) ||
-    li.unroll
+    (li.body.len() == 1 && niters <= opts.max_unroll_count as i128)
 }
 
 fn try_unroll_loop(
