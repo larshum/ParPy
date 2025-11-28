@@ -42,13 +42,13 @@ pub fn from_python(
     let ast = from_py_ast::to_ir_ast(env, ast, structs)?;
     debug_env.print("Initial IR AST", &ast);
 
-    let ast = tpb::propagate_configuration(ast)?;
     let ast = eliminate_gpu_context::apply(ast)?;
     let ast = constant_fold::fold(ast);
     debug_env.print("IR AST after eliminating excessive for-loops", &ast);
 
     let mapping = target_constraints::collect(&ast)?;
     let ast = inter_block::restructure_inter_block_synchronization(ast, &mapping, &opts)?;
+    let ast = tpb::propagate_configuration(ast)?;
     debug_env.print("IR AST after GPU inter-block transformation", &ast);
 
     let classification = classify_functions::apply(&ast, &mapping)?;
