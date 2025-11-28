@@ -136,6 +136,13 @@ def par_reduction():
     """
     return parpy.LoopPar().par_reduction()
 
+def unroll():
+    """
+    Produces a LoopPar object indicating that the associated loop(s) should be
+    unrolled.
+    """
+    return parpy.LoopPar().unroll()
+
 def clear_cache():
     """
     Clears the cached shared library files as well as the local function cache.
