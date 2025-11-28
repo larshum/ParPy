@@ -266,7 +266,7 @@ fn inner_multi_block_reduce_loop(
     Stmt::For {
         var: loop_idx, lo: lo_expr, hi: hi_expr, step: step,
         body: vec![assign],
-        par: LoopPar {nthreads: tpb, reduction: true, tpb},
+        par: LoopPar {nthreads: tpb, reduction: true, tpb, unroll: false},
         i: i.clone()
     }
 }
@@ -293,7 +293,7 @@ fn outer_multi_block_reduce_loop(
         hi: Expr::Int {v: nblocks as i128, ty: int_ty.clone(), i: i.clone()},
         step: 1,
         body: vec![init_stmt, inner_loop],
-        par: LoopPar {nthreads: nblocks as i64, reduction: false, tpb},
+        par: LoopPar {nthreads: nblocks as i64, reduction: false, tpb, unroll: false},
         i: i.clone()
     }
 }
@@ -325,7 +325,8 @@ fn single_block_reduce_loop(
     let par = LoopPar {
         nthreads: i64::min(nblocks as i64, par::DEFAULT_TPB),
         reduction: true,
-        tpb
+        tpb,
+        unroll: false
     };
     Stmt::For {
         var,

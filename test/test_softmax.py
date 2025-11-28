@@ -63,3 +63,15 @@ def test_softmax_compiles(backend):
     }
     s = parpy.print_compiled(softmax, [x, N, M, out], par_opts(backend, p))
     assert len(s) != 0
+
+@pytest.mark.parametrize('backend', compiler_backends)
+def test_softmax_unrolled_compiles(backend):
+    N, M = 256, 512
+    x = torch.randn((N, M), dtype=torch.float32)
+    out = torch.zeros_like(x)
+    p = {
+        "N" : parpy.threads(256),
+        "M": parpy.unroll().threads(128),
+    }
+    s = parpy.print_compiled(softmax, [x, N, M, out], par_opts(backend, p))
+    assert len(s) != 0

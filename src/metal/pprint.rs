@@ -291,7 +291,7 @@ impl PrettyPrint for Stmt {
                 let (env, expr) = expr.pprint(env);
                 (env, format!("{indent}{s} = {expr};"))
             },
-            Stmt::For {var_ty, var, init, cond, incr, body} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll} => {
                 let (env, var_ty) = var_ty.pprint(env);
                 let (env, var) = var.pprint(env);
                 let (env, init) = init.pprint(env);
@@ -300,9 +300,16 @@ impl PrettyPrint for Stmt {
                 let env = env.incr_indent();
                 let (env, body) = pprint_iter(body.iter(), env, "\n");
                 let env = env.decr_indent();
+                let unroll_str = if *unroll {
+                    format!("#pragma unroll\n{indent}")
+                } else {
+                    "".to_string()
+                };
                 let s = format!(
-                    "{0}for ({1} {2} = {3}; {4}; {2} = {5}) {{\n{6}\n{0}}}",
-                    indent, var_ty, var, init, cond, incr, body
+                    "{0}{unroll_str}\
+                     for ({var_ty} {1} = {init}; {cond}; {1} = {incr}) \
+                     {{\n{body}\n{0}}}",
+                    indent, var
                 );
                 (env, s)
             },

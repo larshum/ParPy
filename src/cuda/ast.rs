@@ -283,7 +283,7 @@ pub enum Stmt {
     Definition {ty: Type, id: Name, expr: Option<Expr>},
     For {
         var_ty: Type, var: Name, init: Expr, cond: Expr,
-        incr: Expr, body: Vec<Stmt>
+        incr: Expr, body: Vec<Stmt>, unroll: bool
     },
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>},
     While {cond: Expr, body: Vec<Stmt>},
@@ -313,11 +313,11 @@ impl SMapAccum<Expr> for Stmt {
                 },
                 None => Ok((acc?, Stmt::Definition {ty, id, expr}))
             },
-            Stmt::For {var_ty, var, init, cond, incr, body} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll} => {
                 let (acc, init) = f(acc?, init)?;
                 let (acc, cond) = f(acc, cond)?;
                 let (acc, incr) = f(acc, incr)?;
-                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body}))
+                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, unroll}))
             },
             Stmt::If {cond, thn, els} => {
                 let (acc, cond) = f(acc?, cond)?;
@@ -378,9 +378,9 @@ impl SMapAccum<Stmt> for Stmt {
         f: impl Fn(A, Stmt) -> Result<(A, Stmt), E>
     ) -> Result<(A, Self), E> {
         match self {
-            Stmt::For {var_ty, var, init, cond, incr, body} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body}))
+                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, unroll}))
             },
             Stmt::If {cond, thn, els} => {
                 let (acc, thn) = thn.smap_accum_l_result(acc, &f)?;
@@ -422,9 +422,9 @@ impl SFlatten<Stmt> for Stmt {
         f: impl Fn(Vec<Stmt>, Stmt) -> Result<Vec<Stmt>, E>
     ) -> Result<Vec<Stmt>, E> {
         match self {
-            Stmt::For {var_ty, var, init, cond, incr, body} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll} => {
                 let body = body.sflatten_result(vec![], &f)?;
-                acc.push(Stmt::For {var_ty, var, init, cond, incr, body});
+                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, unroll});
             },
             Stmt::If {cond, thn, els} => {
                 let thn = thn.sflatten_result(vec![], &f)?;

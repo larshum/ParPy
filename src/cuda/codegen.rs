@@ -138,13 +138,13 @@ fn from_gpu_ir_stmt(s: gpu_ast::Stmt) -> CompileResult<Stmt> {
             let expr = from_gpu_ir_expr(expr)?;
             Ok(Stmt::Definition {ty, id, expr: Some(expr)})
         },
-        gpu_ast::Stmt::For {var_ty, var, init, cond, incr, body, ..} => {
+        gpu_ast::Stmt::For {var_ty, var, init, cond, incr, body, unroll, ..} => {
             let var_ty = from_gpu_ir_type(var_ty);
             let init = from_gpu_ir_expr(init)?;
             let cond = from_gpu_ir_expr(cond)?;
             let incr = from_gpu_ir_expr(incr)?;
             let body = from_gpu_ir_stmts(body)?;
-            Ok(Stmt::For {var_ty, var, init, cond, incr, body})
+            Ok(Stmt::For {var_ty, var, init, cond, incr, body, unroll})
         },
         gpu_ast::Stmt::If {cond, thn, els, ..} => {
             let cond = from_gpu_ir_expr(cond)?;

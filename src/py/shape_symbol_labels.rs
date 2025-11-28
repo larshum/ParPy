@@ -34,41 +34,54 @@ fn collect_shape_variables(acc: BTreeSet<Name>, p: &Param) -> BTreeSet<Name> {
     collect_shape_variables_type(acc, &p.ty)
 }
 
-fn insert_implicit_labels(
+fn collect_implicit_labels_helper(
     shape_vars: &BTreeSet<Name>,
-    mut labels: Vec<String>,
+    mut labels: BTreeSet<String>,
     e: &Expr
-) -> Vec<String> {
+) -> BTreeSet<String> {
     match e {
         Expr::Var {id, ..} if shape_vars.contains(id) => {
-            labels.push(id.get_str().clone());
+            labels.insert(id.get_str().clone());
             labels
         },
-        _ => e.sfold(labels, |labels, e| insert_implicit_labels(shape_vars, labels, e))
+        _ => e.sfold(labels, |labels, e| {
+            collect_implicit_labels_helper(shape_vars, labels, e)
+        })
     }
+}
+
+fn collect_implicit_labels(
+    shape_vars: &BTreeSet<Name>,
+    acc: BTreeSet<String>,
+    e: &Expr
+) -> BTreeSet<String> {
+    collect_implicit_labels_helper(shape_vars, acc, e)
 }
 
 fn add_implicit_labels_stmt(
     shape_vars: &BTreeSet<Name>,
     s: Stmt
 ) -> Stmt {
-    let add_implicit_labels = |labels: Vec<String>, e: &Expr| -> Vec<String> {
-        insert_implicit_labels(shape_vars, labels, e)
-    };
     match s {
         Stmt::Definition {ty, id, expr, labels, i} => {
-            let labels = add_implicit_labels(labels, &expr);
+            let l = labels.into_iter().collect::<BTreeSet<String>>();
+            let l = collect_implicit_labels(&shape_vars, l, &expr);
+            let labels = l.into_iter().collect::<Vec<String>>();
             Stmt::Definition {ty, id, expr, labels, i}
         },
         Stmt::Assign {dst, expr, labels, i} => {
-            let labels = add_implicit_labels(labels, &dst);
-            let labels = add_implicit_labels(labels, &expr);
+            let l = labels.into_iter().collect::<BTreeSet<String>>();
+            let l = collect_implicit_labels(&shape_vars, l, &dst);
+            let l = collect_implicit_labels(&shape_vars, l, &expr);
+            let labels = l.into_iter().collect::<Vec<String>>();
             Stmt::Assign {dst, expr, labels, i}
         },
         Stmt::For {var, lo, hi, step, body, labels, i} => {
-            let labels = add_implicit_labels(labels, &lo);
-            let labels = add_implicit_labels(labels, &hi);
+            let l = labels.into_iter().collect::<BTreeSet<String>>();
+            let l = collect_implicit_labels(&shape_vars, l, &lo);
+            let l = collect_implicit_labels(&shape_vars, l, &hi);
             let body = body.smap(|s| add_implicit_labels_stmt(shape_vars, s));
+            let labels = l.into_iter().collect::<Vec<String>>();
             Stmt::For {var, lo, hi, step, body, labels, i}
         },
         _ => s.smap(|s| add_implicit_labels_stmt(shape_vars, s))
@@ -196,7 +209,7 @@ mod test {
             i: i()
         };
         if let Stmt::For {labels, ..} = add_implicit_labels_stmt(&shape_vars, s) {
-            assert_eq!(labels, vec!["N".to_string(), "M".to_string()]);
+            assert_eq!(labels, vec!["M".to_string(), "N".to_string()]);
         } else {
             assert!(false);
         }
@@ -239,6 +252,64 @@ mod test {
             }
         } else {
             assert!(false);
+        }
+    }
+
+    #[test]
+    fn collect_no_duplicated_labels() {
+        let n = Name::sym_str("N");
+        let shape_vars = mk_shape_vars(vec![n.clone()]);
+        let v = Expr::Var {id: n, ty: tyuk(), i: i()};
+        let idx_expr = Expr::Tuple {
+            elems: vec![
+                Expr::Slice {
+                    lo: None,
+                    hi: Some(Box::new(v.clone())),
+                    ty: tyuk(),
+                    i: i()
+                },
+                Expr::Slice {
+                    lo: None,
+                    hi: Some(Box::new(v)),
+                    ty: tyuk(),
+                    i: i()
+                },
+            ],
+            ty: tyuk(),
+            i: i()
+        };
+        let labels = collect_implicit_labels(&shape_vars, BTreeSet::new(), &idx_expr);
+        assert_eq!(labels, vec!["N".to_string()].into_iter().collect::<BTreeSet<String>>());
+    }
+
+    #[test]
+    fn add_duplicated_labels_in_stmt() {
+        let n = Name::sym_str("N");
+        let shape_vars = mk_shape_vars(vec![n.clone()]);
+        let v = Expr::Var {id: n, ty: tyuk(), i: i()};
+        let idx_expr = Expr::Slice {
+            lo: None,
+            hi: Some(Box::new(v.clone())),
+            ty: tyuk(),
+            i: i()
+        };
+        let subscript = Expr::Subscript {
+            target: Box::new(v),
+            idx: Box::new(idx_expr),
+            ty: tyuk(),
+            i: i()
+        };
+        let s = Stmt::Assign {
+            dst: subscript.clone(),
+            expr: subscript,
+            labels: vec![],
+            i: i()
+        };
+        if let Stmt::Assign {labels, ..} = add_implicit_labels_stmt(&shape_vars, s) {
+            assert_eq!(labels.len(), 1);
+            assert_eq!(labels, vec!["N".to_string()]);
+        } else {
+            assert!(false)
         }
     }
 }

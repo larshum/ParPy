@@ -73,8 +73,8 @@ def unop_should_fail(backend, fn, dtype, running):
         # The tanh operation for half-precision numbers seems to have been
         # added in CUDA 12.8. Therefore, if we are running the generated code,
         # this should fail if using a less recent version.
-        version = torch.version.cuda
-        major, minor = version.split('.')
+        version = get_cuda_backend()
+        major, minor = version.split('.')[:2]
         if int(major) > 12 or int(major) == 12 and int(minor) >= 8:
             return not dtype in [parpy.types.F16, parpy.types.F32, parpy.types.F64]
         else:

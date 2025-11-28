@@ -317,13 +317,14 @@ fn generate_kernel_stmt(
             let var_ty = from_ir_type(lo.get_type().clone());
             let (init, cond, incr) = determine_loop_bounds(p, var.clone(), lo, hi, step)?;
             let body = generate_kernel_stmts(grid, map, vec![], body)?;
+            let unroll = par.unroll;
             if par.is_parallel() && par.reduction {
                 acc.push(Stmt::ParallelReduction {
                     var_ty, var, init, cond, incr, body, nthreads: par.nthreads,
-                    tpb: par.tpb, i
+                    tpb: par.tpb, unroll, i
                 });
             } else {
-                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, i});
+                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, unroll, i});
             };
         },
         ir_ast::Stmt::If {cond, thn, els, i} => {
@@ -460,8 +461,9 @@ fn from_ir_stmt(
                 None => {
                     let (init, cond, incr) = determine_loop_bounds(None, var.clone(), lo, hi, step)?;
                     let (body, kernels) = from_ir_stmts(env, fun_id, vec![], kernels, body)?;
+                    let unroll = par.unroll;
                     host_body.push(Stmt::For {
-                        var_ty, var, init, cond, incr, body, i
+                        var_ty, var, init, cond, incr, body, unroll, i
                     });
                     Ok(kernels)
                 }
@@ -833,7 +835,7 @@ mod test {
             var: id("x"),
             init: int(0, None),
             cond: binop(var("x", ty.clone()), BinOp::Lt, int(10, None), bool_ty()),
-            incr, body: vec![], i: Info::default()
+            incr, body: vec![], unroll: false, i: Info::default()
         };
         let s = gen_kernel_stmt(1, 1, 1, s).unwrap();
         assert_equal_statements(s, expected);
@@ -869,7 +871,7 @@ mod test {
             var_ty: ty.clone(),
             var: id("x"),
             cond: binop(var("x", ty.clone()), BinOp::Lt, int(10, None), bool_ty()),
-            init, incr, body: vec![], i: Info::default()
+            init, incr, body: vec![], unroll: false, i: Info::default()
         };
         assert_equal_statements(gen_kernel_stmt(1, 128, 128, s).unwrap(), expected);
     }
@@ -914,6 +916,7 @@ mod test {
             body: vec![],
             nthreads: 2000,
             tpb: 1024,
+            unroll: false,
             i: Info::default()
         };
         assert_equal_statements(gen_kernel_stmt(2, 1024, 2000, s).unwrap(), expected);
@@ -976,6 +979,7 @@ mod test {
                 ty
             ),
             body: vec![],
+            unroll: false,
             i: Info::default()
         };
         assert_eq!(body.pop().unwrap(), expected);

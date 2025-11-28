@@ -11,19 +11,21 @@ pub const DEFAULT_TPB: i64 = 1024;
 pub struct LoopPar {
     pub nthreads: i64,
     pub reduction: bool,
-    pub tpb: i64
+    pub tpb: i64,
+    pub unroll: bool,
 }
 
 impl Default for LoopPar {
     fn default() -> Self {
-        LoopPar {nthreads: 0, reduction: false, tpb: DEFAULT_TPB}
+        LoopPar {nthreads: 0, reduction: false, tpb: DEFAULT_TPB, unroll: false}
     }
 }
 
 impl PrettyPrint for LoopPar {
     fn pprint(&self, env: PrettyPrintEnv) -> (PrettyPrintEnv, String) {
-        let LoopPar {nthreads, reduction, tpb} = self;
-        (env, format!("{{nthreads = {nthreads}, reduction = {reduction}, tpb = {tpb}}}"))
+        let LoopPar {nthreads, reduction, tpb, unroll} = self;
+        (env, format!("{{\n  nthreads = {nthreads},\n  reduction = {reduction},\n  \
+                         tpb = {tpb},\n  unroll = {unroll}\n}}"))
     }
 }
 
@@ -66,6 +68,10 @@ impl LoopPar {
                                          be a positive integer divisible by 32."))
         }
     }
+
+    pub fn unroll(&self) -> Self {
+        LoopPar {unroll: true, ..self.clone()}
+    }
 }
 
 fn merge_values(l: i64, r: i64, default_value: i64) -> Option<i64> {
@@ -79,12 +85,12 @@ fn merge_values(l: i64, r: i64, default_value: i64) -> Option<i64> {
 }
 
 impl LoopPar {
-
     pub fn try_merge(mut self, other: Option<&LoopPar>) -> Option<LoopPar> {
         if let Some(o) = other {
             self.nthreads = merge_values(self.nthreads, o.nthreads, 0)?;
             self.tpb = merge_values(self.tpb, o.tpb, DEFAULT_TPB)?;
             self.reduction = self.reduction || o.reduction;
+            self.unroll = self.unroll || o.unroll;
         };
         Some(self)
     }
