@@ -89,7 +89,7 @@ fn extract_gpu_ast_loop_bounds(
 
 fn gpu_ast_to_py_stmt(s: gpu_ast::Stmt) -> CompileResult<py_ast::Stmt> {
     match s {
-        gpu_ast::Stmt::For {var_ty: _, var, init, cond, incr, body, i} => {
+        gpu_ast::Stmt::For {var_ty: _, var, init, cond, incr, body, unroll: _, i} => {
             let (lo, hi, step) = extract_gpu_ast_loop_bounds(init, cond, incr)?;
             let body = body.into_iter()
                 .map(|s| gpu_ast_to_py_stmt(s))

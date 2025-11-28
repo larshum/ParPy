@@ -55,7 +55,7 @@ fn generate_warp_reduction(
     Stmt::For {
         var_ty: int_ty.clone(), var: iter_id, init: int_lit(16),
         cond: cond_expr, incr: incr_expr, body: vec![sync_stmt],
-        i: i.clone()
+        unroll: false, i: i.clone()
     }
 }
 
@@ -227,6 +227,7 @@ fn generate_cluster_iterative_reduction(
         var: loop_id,
         init, cond, incr,
         body: loop_body,
+        unroll: false,
         i: i.clone()
     });
 }

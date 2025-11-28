@@ -371,7 +371,7 @@ pub enum Stmt {
     Definition {ty: Type, id: Name, expr: Expr, i: Info},
     For {
         var_ty: Type, var: Name, init: Expr, cond: Expr,
-        incr: Expr, body: Vec<Stmt>, i: Info
+        incr: Expr, body: Vec<Stmt>, unroll: bool, i: Info
     },
     If {cond: Expr, thn: Vec<Stmt>, els: Vec<Stmt>, i: Info},
     While {cond: Expr, body: Vec<Stmt>, i: Info},
@@ -382,7 +382,7 @@ pub enum Stmt {
     // Intermediate node representing a parallel reduction.
     ParallelReduction {
         var_ty: Type, var: Name, init: Expr, cond: Expr, incr: Expr,
-        body: Vec<Stmt>, nthreads: i64, tpb: i64, i: Info
+        body: Vec<Stmt>, nthreads: i64, tpb: i64, unroll: bool, i: Info
     },
 
     // Synchronization among threads in a given scope within a kernel. Ensures that all included
@@ -448,11 +448,11 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, expr) = f(acc?, expr)?;
                 Ok((acc, Stmt::Definition {ty, id, expr, i}))
             },
-            Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
                 let (acc, init) = f(acc?, init)?;
                 let (acc, cond) = f(acc, cond)?;
                 let (acc, incr) = f(acc, incr)?;
-                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, i}))
+                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, unroll, i}))
             },
             Stmt::If {cond, thn, els, i} => {
                 let (acc, cond) = f(acc?, cond)?;
@@ -470,11 +470,11 @@ impl SMapAccum<Expr> for Stmt {
                 let (acc, e) = f(acc?, e)?;
                 Ok((acc, Stmt::Expr {e, i}))
             },
-            Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i} => {
+            Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i} => {
                 let (acc, init) = f(acc?, init)?;
                 let (acc, cond) = f(acc, cond)?;
                 let (acc, incr) = f(acc, incr)?;
-                Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i}))
+                Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i}))
             },
             Stmt::WarpReduce {value, op, int_ty, res_ty, i} => {
                 let (acc, value) = f(acc?, value)?;
@@ -541,9 +541,9 @@ impl SMapAccum<Stmt> for Stmt {
         f: impl Fn(A, Stmt) -> Result<(A, Stmt), E>
     ) -> Result<(A, Self), E> {
         match self {
-            Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, i}))
+                Ok((acc, Stmt::For {var_ty, var, init, cond, incr, body, unroll, i}))
             },
             Stmt::If {cond, thn, els, i} => {
                 let (acc, thn) = thn.smap_accum_l_result(acc, &f)?;
@@ -558,9 +558,9 @@ impl SMapAccum<Stmt> for Stmt {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
                 Ok((acc, Stmt::Scope {body, i}))
             },
-            Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i} => {
+            Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i} => {
                 let (acc, body) = body.smap_accum_l_result(acc, &f)?;
-                Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i}))
+                Ok((acc, Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i}))
             },
             Stmt::Definition {..} | Stmt::Return {..} |
             Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
@@ -601,9 +601,9 @@ impl SFlatten<Stmt> for Stmt {
         f: impl Fn(Vec<Stmt>, Stmt) -> Result<Vec<Stmt>, E>
     ) -> Result<Vec<Stmt>, E> {
         match self {
-            Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
                 let body = body.sflatten_result(vec![], &f)?;
-                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, i});
+                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, unroll, i});
             },
             Stmt::If {cond, thn, els, i} => {
                 let thn = thn.sflatten_result(vec![], &f)?;
@@ -618,11 +618,14 @@ impl SFlatten<Stmt> for Stmt {
                 let body = body.sflatten_result(vec![], &f)?;
                 acc.push(Stmt::Scope {body, i})
             }
+            Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i} => {
+                let body = body.sflatten_result(vec![], &f)?;
+                acc.push(Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i});
+            },
             Stmt::Definition {..} | Stmt::Return {..} |
-            Stmt::Expr {..} | Stmt::ParallelReduction {..} | Stmt::Synchronize {..} |
-            Stmt::WarpReduce {..} | Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} |
-            Stmt::AllocDevice {..} | Stmt::AllocShared {..} | Stmt::FreeDevice {..} |
-            Stmt::CopyMemory {..} => {
+            Stmt::Expr {..} | Stmt::Synchronize {..} | Stmt::WarpReduce {..} |
+            Stmt::ClusterReduce {..} | Stmt::KernelLaunch {..} | Stmt::AllocDevice {..} |
+            Stmt::AllocShared {..} | Stmt::FreeDevice {..} | Stmt::CopyMemory {..} => {
                 acc.push(self);
             }
         };

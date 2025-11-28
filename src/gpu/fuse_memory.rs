@@ -212,10 +212,10 @@ fn replace_reads_with_locals_expr(env: FuseEnv, e: Expr) -> (FuseEnv, Expr) {
 
 fn replace_reads_with_locals_stmt(env: FuseEnv, s: Stmt) -> (FuseEnv, Stmt) {
     match s {
-        Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+        Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
             let inner_env = FuseEnv {write_locs: BTreeMap::new(), ..env.clone()};
             let (_, body) = body.smap_accum_l(inner_env, replace_reads_with_locals_stmt);
-            (env, Stmt::For {var_ty, var, init, cond, incr, body, i})
+            (env, Stmt::For {var_ty, var, init, cond, incr, body, unroll, i})
         },
         Stmt::If {cond, thn, els, i} => {
             let inner_env = FuseEnv {write_locs: BTreeMap::new(), ..env.clone()};
@@ -331,11 +331,11 @@ fn remove_repeated_writes_stmt(env: FuseEnv, s: Stmt) -> (FuseEnv, Option<Stmt>)
                 (env, Some(reconstruct_stmt(lhs, rhs, ty, i, s_i)))
             }
         },
-        Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+        Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
             let env = body.sfold(env, collect_read_operations_stmt);
             let inner_env = FuseEnv {write_state: BTreeMap::new(), ..env.clone()};
             let body = remove_repeated_writes(inner_env, body);
-            (env, Some(Stmt::For {var_ty, var, init, cond, incr, body, i}))
+            (env, Some(Stmt::For {var_ty, var, init, cond, incr, body, unroll, i}))
         },
         Stmt::If {cond, thn, els, i} => {
             let env = thn.sfold(env, collect_read_operations_stmt);

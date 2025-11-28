@@ -167,6 +167,7 @@ struct LoopStruct {
     pub ne: Expr,
     pub nthreads: i64,
     pub tpb: i64,
+    pub unroll: bool
 }
 
 struct ReduceEnv {
@@ -206,6 +207,7 @@ fn generate_main_reduction_loop(env: &ReduceEnv, acc: &mut Vec<Stmt>) {
         cond: env.for_loop.cond.clone(),
         incr: env.for_loop.incr.clone(),
         body: vec![temp_assign],
+        unroll: env.for_loop.unroll.clone(),
         i: env.i.clone()
     });
     acc.push(Stmt::Synchronize {scope: SyncScope::Block, i: env.i.clone()});
@@ -464,12 +466,12 @@ fn expand_parallel_reduction_stmt(
     s: Stmt
 ) -> CompileResult<Stmt> {
     match s {
-        Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, i} => {
+        Stmt::ParallelReduction {var_ty, var, init, cond, incr, body, nthreads, tpb, unroll, i} => {
             let kind = classify_reduction(opts, nthreads, tpb, &i)?;
             let (lhs, op, rhs, sz, i) = extract_reduction_operands(body, &i)?;
             let ne = reduction_op_neutral_element(&op, &sz, &i)?;
             let loop_contents = LoopStruct {
-                var_ty, var, init, cond, incr, lhs, op, rhs, ne, nthreads, tpb
+                var_ty, var, init, cond, incr, lhs, op, rhs, ne, nthreads, tpb, unroll
             };
             Ok(generate_parallel_reduction(loop_contents, sz, i, kind))
         },

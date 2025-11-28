@@ -315,7 +315,7 @@ impl PrettyPrint for Stmt {
                 let (env, expr) = expr.pprint(env);
                 (env, format!("{indent}{s} = {expr};"))
             },
-            Stmt::For {var_ty, var, init, cond, incr, body, ..} => {
+            Stmt::For {var_ty, var, init, cond, incr, body, unroll, ..} => {
                 let (env, var_ty) = var_ty.pprint(env);
                 let (env, var) = var.pprint(env);
                 let (env, init) = init.pprint(env);
@@ -324,8 +324,13 @@ impl PrettyPrint for Stmt {
                 let env = env.incr_indent();
                 let (env, body) = pprint_iter(body.iter(), env, "\n");
                 let env = env.decr_indent();
+                let unroll_str = if *unroll {
+                    format!("[unroll] ")
+                } else {
+                    "".to_string()
+                };
                 let s = format!(
-                    "{0}for ({1} {2} = {3}; {4}; {2} = {5}) {{\n{6}\n{0}}}",
+                    "{0}{unroll_str}for ({1} {2} = {3}; {4}; {2} = {5}) {{\n{6}\n{0}}}",
                     indent, var_ty, var, init, cond, incr, body
                 );
                 (env, s)
@@ -646,6 +651,7 @@ mod test {
             cond: binop(i_var.clone(), BinOp::Lt, int(10, None), scalar(ElemSize::Bool)),
             incr: binop(i_var.clone(), BinOp::Add, int(1, None), scalar(ElemSize::I64)),
             body: vec![assign(uvar("x"), uvar("y"))],
+            unroll: false,
             i: i()
         };
         let indent = " ".repeat(pprint::DEFAULT_INDENT);
