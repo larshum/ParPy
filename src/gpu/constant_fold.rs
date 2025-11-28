@@ -163,18 +163,13 @@ fn literal_bool_value(cond: &Expr) -> LitBoolValue {
 
 fn fold_stmt_acc(mut acc: Vec<Stmt>, s: Stmt) -> Vec<Stmt> {
     match s {
-        Stmt::For {var_ty, var, init, cond, incr, body, i} => {
+        Stmt::For {var_ty, var, init, cond, incr, body, unroll, i} => {
             let init = fold_expr(init);
             let cond = fold_expr(cond);
             let incr = fold_expr(incr);
-            if loop_runs_once(&var, &init, &cond, &incr) {
-                acc.push(Stmt::Definition {ty: var_ty, id: var, expr: init, i});
-                body.sfold_owned(acc, fold_stmt_acc)
-            } else {
-                let body = fold_stmts(body);
-                acc.push(Stmt::For {var_ty, var, init, cond, incr, body, i});
-                acc
-            }
+            let body = fold_stmts(body);
+            acc.push(Stmt::For {var_ty, var, init, cond, incr, body, unroll, i});
+            acc
         },
         Stmt::If {cond, thn, els, i} => {
             let cond = fold_expr(cond);
@@ -459,22 +454,6 @@ mod test {
     fn lit_bool_var_unknown() {
         let e = var("x", scalar(ElemSize::Bool));
         assert_eq!(literal_bool_value(&e), LitBoolValue::Unknown);
-    }
-
-    #[test]
-    fn fold_for_loop_stmt_running_once() {
-        let (init, cond, incr) = _loop();
-        let s = Stmt::For {
-            var_ty: scalar(ElemSize::I64), var: id("x"),
-            init: init.clone(), cond, incr,
-            body: vec![], i: i()
-        };
-        let expected = vec![
-            Stmt::Definition {
-                ty: scalar(ElemSize::I64), id: id("x"), expr: init, i: i()
-            }
-        ];
-        assert_eq!(fold_stmt_acc(vec![], s), expected);
     }
 
     #[test]
