@@ -290,9 +290,147 @@ mod test {
     use super::*;
     use crate::gpu::ast_builder::*;
     use crate::test::*;
+    use crate::utils::pprint::*;
+
+    fn eq_stmts(lhs: Vec<Stmt>, rhs: Vec<Stmt>) {
+        let (_, l) = pprint_iter(lhs.iter(), PrettyPrintEnv::default(), "\n");
+        let (_, r) = pprint_iter(rhs.iter(), PrettyPrintEnv::default(), "\n");
+        assert_eq!(
+            lhs,
+            rhs,
+            "LHS: {l}\nRHS: {r}"
+        );
+    }
 
     #[test]
-    fn for_loop_containing_non_empty_if_not_unrolled() {
+    fn singleton_for_loop_is_unrolled() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: int(0, Some(ElemSize::I64)),
+            cond: binop(x.clone(), BinOp::Lt, int(10, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(1, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let expected = (0..10).into_iter()
+            .map(|n| {
+                let rhs = if n == 0 {
+                    int(0, Some(ElemSize::I64))
+                } else {
+                    binop(
+                        int(0, Some(ElemSize::I64)),
+                        BinOp::Add,
+                        int(n, Some(ElemSize::I64)),
+                        scalar(ElemSize::I64))
+                };
+                assign_to_y(rhs)
+            })
+            .collect::<Vec<Stmt>>();
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn singleton_unroll_threads() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+            cond: binop(x.clone(), BinOp::Lt, int(64, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(32, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let expected = (0..2).into_iter()
+            .map(|n| {
+                let rhs = if n == 0 {
+                    Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()}
+                } else {
+                    binop(
+                        Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+                        BinOp::Add,
+                        int(n*32, Some(ElemSize::I64)),
+                        scalar(ElemSize::I64)
+                    )
+                };
+                assign_to_y(rhs)
+            })
+            .collect::<Vec<Stmt>>();
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn singleton_partial_unroll() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+            cond: binop(x.clone(), BinOp::Lt, int(48, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(32, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let tidx = Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()};
+        let expected = vec![
+            assign_to_y(tidx.clone()),
+            Stmt::Expr {
+                e: Expr::IfExpr {
+                    cond: Box::new(binop(
+                        tidx.clone(),
+                        BinOp::Lt,
+                        int(48-32, Some(ElemSize::I64)),
+                        scalar(ElemSize::Bool)
+                    )),
+                    thn: Box::new(convert(
+                        Type::Void,
+                        Expr::Assign {
+                            lhs: Box::new(y.clone()),
+                            rhs: Box::new(binop(
+                                y.clone(),
+                                BinOp::Add,
+                                binop(
+                                    tidx.clone(),
+                                    BinOp::Add,
+                                    int(32, Some(ElemSize::I64)),
+                                    scalar(ElemSize::I64)),
+                                scalar(ElemSize::I64))),
+                            ty: scalar(ElemSize::I64),
+                            i: i()
+                        }
+                    )),
+                    els: Box::new(convert(Type::Void, int(0, Some(ElemSize::I64)))),
+                    ty: scalar(ElemSize::I64),
+                    i: i()
+                },
+                i: i()
+            }
+        ];
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn for_loop_containing_non_empty_if_is_not_unrolled() {
         let x = id("x");
         let body = if_stmt(
             bool_expr(true),
@@ -310,6 +448,6 @@ mod test {
             i: i()
         };
         let opts = CompileOptions::default();
-        assert_eq!(unroll_loops_stmt(vec![], s.clone(), &opts), vec![s]);
+        eq_stmts(unroll_loops_stmt(vec![], s.clone(), &opts), vec![s]);
     }
 }
