@@ -2,7 +2,7 @@ use super::ast::*;
 use crate::option::CompileOptions;
 use crate::utils::info::Info;
 use crate::utils::name::Name;
-use crate::utils::smap::{SFlatten, SFold, SMapAccum};
+use crate::utils::smap::{SFlatten, SMapAccum};
 use crate::utils::substitute::SubVars;
 
 use std::collections::BTreeMap;
@@ -173,12 +173,33 @@ fn unroll_body(
         .collect::<Vec<Stmt>>()
 }
 
-fn count_stmts(acc: i64, s: &Stmt) -> i64 {
-    s.sfold(acc+1, count_stmts)
+fn is_leaf_stmt(s: &Stmt) -> bool {
+    match s {
+        Stmt::For {..} |
+        Stmt::If {..} |
+        Stmt::While {..} |
+        Stmt::Scope {..} |
+        Stmt::ParallelReduction {..} => {
+            false
+        },
+        Stmt::Definition {..} |
+        Stmt::Return {..} |
+        Stmt::Expr {..} |
+        Stmt::Synchronize {..} |
+        Stmt::WarpReduce {..} |
+        Stmt::ClusterReduce {..} |
+        Stmt::KernelLaunch {..} |
+        Stmt::AllocDevice {..} |
+        Stmt::AllocShared {..} |
+        Stmt::FreeDevice {..} |
+        Stmt::CopyMemory {..} => {
+            true
+        }
+    }
 }
 
-fn count_stmts_body(body: &Vec<Stmt>) -> i64 {
-    body.iter().map(|s| count_stmts(0, s)).sum()
+fn is_singleton_stmt_body(body: &Vec<Stmt>) -> bool {
+    body.len() == 1 && body.iter().all(is_leaf_stmt)
 }
 
 fn should_unroll_loop(
@@ -193,14 +214,13 @@ fn should_unroll_loop(
     // 1. The loop runs exactly one iteration for all threads. In this case, we simply replace the
     //    for-loop by a definition corresponding to the initial value of the for-loop.
     // 2. The loop contains exactly one statement, and it contains no more iterations than the
-    //    globally specified limit (using the 'max_unroll_count' attribute). Note that we count the
-    //    number of statements recursively to avoid unrolling when the body is a single compound
-    //    statement (such as an if-statement).
+    //    globally specified limit (using the 'max_unroll_count' attribute). Note that this single
+    //    statement must be a leaf node (as is the case for the reduction operators).
     //
     // If the user explicitly asks for unrolling in other cases, we inform the underlying compiler
     // about this instead of doing the unrolling ourselves.
     hi-lo == step_size ||
-    (count_stmts_body(&li.body) == 1 && niters <= opts.max_unroll_count as i128)
+    (is_singleton_stmt_body(&li.body) && niters <= opts.max_unroll_count as i128)
 }
 
 fn try_unroll_loop(
