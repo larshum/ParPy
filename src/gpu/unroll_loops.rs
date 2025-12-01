@@ -15,7 +15,6 @@ struct LoopInfo {
     cond: Expr,
     incr: Expr,
     body: Vec<Stmt>,
-    unroll: bool,
     i: Info
 }
 
@@ -174,6 +173,35 @@ fn unroll_body(
         .collect::<Vec<Stmt>>()
 }
 
+fn is_leaf_stmt(s: &Stmt) -> bool {
+    match s {
+        Stmt::For {..} |
+        Stmt::If {..} |
+        Stmt::While {..} |
+        Stmt::Scope {..} |
+        Stmt::ParallelReduction {..} => {
+            false
+        },
+        Stmt::Definition {..} |
+        Stmt::Return {..} |
+        Stmt::Expr {..} |
+        Stmt::Synchronize {..} |
+        Stmt::WarpReduce {..} |
+        Stmt::ClusterReduce {..} |
+        Stmt::KernelLaunch {..} |
+        Stmt::AllocDevice {..} |
+        Stmt::AllocShared {..} |
+        Stmt::FreeDevice {..} |
+        Stmt::CopyMemory {..} => {
+            true
+        }
+    }
+}
+
+fn is_singleton_stmt_body(body: &Vec<Stmt>) -> bool {
+    body.len() == 1 && body.iter().all(is_leaf_stmt)
+}
+
 fn should_unroll_loop(
     li: &LoopInfo,
     opts: &CompileOptions,
@@ -186,14 +214,13 @@ fn should_unroll_loop(
     // 1. The loop runs exactly one iteration for all threads. In this case, we simply replace the
     //    for-loop by a definition corresponding to the initial value of the for-loop.
     // 2. The loop contains exactly one statement, and it contains no more iterations than the
-    //    globally specified limit (using the 'max_unroll_count' attribute).
-    // 3. The loop has been explicitly annotated with the 'unroll' attribute. In this case,
-    //    applicable loops (for which we know the lower-bound, upper-bound, and step size) will be
-    //    unrolled regardless of how many iterations they involve. Otherwise, if they are not
-    //    applicable, the generated code will request the native compiler to do unrolling for us.
+    //    globally specified limit (using the 'max_unroll_count' attribute). Note that this single
+    //    statement must be a leaf node (as is the case for the reduction operators).
+    //
+    // If the user explicitly asks for unrolling in other cases, we inform the underlying compiler
+    // about this instead of doing the unrolling ourselves.
     hi-lo == step_size ||
-    (li.body.len() == 1 && niters <= opts.max_unroll_count as i128) ||
-    li.unroll
+    (is_singleton_stmt_body(&li.body) && niters <= opts.max_unroll_count as i128)
 }
 
 fn try_unroll_loop(
@@ -221,7 +248,6 @@ fn unroll_loops_stmt(mut acc: Vec<Stmt>, s: Stmt, opts: &CompileOptions) -> Vec<
                 cond: cond.clone(),
                 incr: incr.clone(),
                 body: body.clone(),
-                unroll: unroll.clone(),
                 i: i.clone()
             };
             match try_unroll_loop(li, &opts) {
@@ -247,9 +273,7 @@ fn unroll_loops_stmt(mut acc: Vec<Stmt>, s: Stmt, opts: &CompileOptions) -> Vec<
 
 fn unroll_loops_top(t: Top, opts: &CompileOptions) -> Top {
     match t {
-        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => {
-            t
-        },
+        Top::ExtDecl {..} | Top::FunDef {..} | Top::StructDef {..} => t,
         Top::KernelFunDef {attrs, id, params, body, i} => {
             let body = body.sflatten(vec![], |acc, s| unroll_loops_stmt(acc, s, &opts));
             Top::KernelFunDef {attrs, id, params, body, i}
@@ -259,4 +283,171 @@ fn unroll_loops_top(t: Top, opts: &CompileOptions) -> Top {
 
 pub fn apply(ast: Ast, opts: &CompileOptions) -> Ast {
     ast.smap(|t| unroll_loops_top(t, &opts))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::gpu::ast_builder::*;
+    use crate::test::*;
+    use crate::utils::pprint::*;
+
+    fn eq_stmts(lhs: Vec<Stmt>, rhs: Vec<Stmt>) {
+        let (_, l) = pprint_iter(lhs.iter(), PrettyPrintEnv::default(), "\n");
+        let (_, r) = pprint_iter(rhs.iter(), PrettyPrintEnv::default(), "\n");
+        assert_eq!(
+            lhs,
+            rhs,
+            "LHS: {l}\nRHS: {r}"
+        );
+    }
+
+    #[test]
+    fn singleton_for_loop_is_unrolled() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: int(0, Some(ElemSize::I64)),
+            cond: binop(x.clone(), BinOp::Lt, int(10, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(1, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let expected = (0..10).into_iter()
+            .map(|n| {
+                let rhs = if n == 0 {
+                    int(0, Some(ElemSize::I64))
+                } else {
+                    binop(
+                        int(0, Some(ElemSize::I64)),
+                        BinOp::Add,
+                        int(n, Some(ElemSize::I64)),
+                        scalar(ElemSize::I64))
+                };
+                assign_to_y(rhs)
+            })
+            .collect::<Vec<Stmt>>();
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn singleton_unroll_threads() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+            cond: binop(x.clone(), BinOp::Lt, int(64, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(32, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let expected = (0..2).into_iter()
+            .map(|n| {
+                let rhs = if n == 0 {
+                    Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()}
+                } else {
+                    binop(
+                        Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+                        BinOp::Add,
+                        int(n*32, Some(ElemSize::I64)),
+                        scalar(ElemSize::I64)
+                    )
+                };
+                assign_to_y(rhs)
+            })
+            .collect::<Vec<Stmt>>();
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn singleton_partial_unroll() {
+        let x = var("x", scalar(ElemSize::I64));
+        let y = var("y", scalar(ElemSize::I64));
+        let assign_to_y = |rhs| {
+            assign(y.clone(), binop(y.clone(), BinOp::Add, rhs, scalar(ElemSize::I64)))
+        };
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: id("x"),
+            init: Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()},
+            cond: binop(x.clone(), BinOp::Lt, int(48, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(x.clone(), BinOp::Add, int(32, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![assign_to_y(x.clone())],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        let tidx = Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()};
+        let expected = vec![
+            assign_to_y(tidx.clone()),
+            Stmt::Expr {
+                e: Expr::IfExpr {
+                    cond: Box::new(binop(
+                        tidx.clone(),
+                        BinOp::Lt,
+                        int(48-32, Some(ElemSize::I64)),
+                        scalar(ElemSize::Bool)
+                    )),
+                    thn: Box::new(convert(
+                        Type::Void,
+                        Expr::Assign {
+                            lhs: Box::new(y.clone()),
+                            rhs: Box::new(binop(
+                                y.clone(),
+                                BinOp::Add,
+                                binop(
+                                    tidx.clone(),
+                                    BinOp::Add,
+                                    int(32, Some(ElemSize::I64)),
+                                    scalar(ElemSize::I64)),
+                                scalar(ElemSize::I64))),
+                            ty: scalar(ElemSize::I64),
+                            i: i()
+                        }
+                    )),
+                    els: Box::new(convert(Type::Void, int(0, Some(ElemSize::I64)))),
+                    ty: scalar(ElemSize::I64),
+                    i: i()
+                },
+                i: i()
+            }
+        ];
+        eq_stmts(unroll_loops_stmt(vec![], s, &opts), expected);
+    }
+
+    #[test]
+    fn for_loop_containing_non_empty_if_is_not_unrolled() {
+        let x = id("x");
+        let body = if_stmt(
+            bool_expr(true),
+            vec![assign(var("y", scalar(ElemSize::I64)), int(1, Some(ElemSize::I64)))],
+            vec![assign(var("y", scalar(ElemSize::I64)), int(2, Some(ElemSize::I64)))]
+        );
+        let s = Stmt::For {
+            var_ty: scalar(ElemSize::I64),
+            var: x.clone(),
+            init: int(0, Some(ElemSize::I64)),
+            cond: binop(var("x", scalar(ElemSize::I64)), BinOp::Lt, int(10, Some(ElemSize::I64)), scalar(ElemSize::Bool)),
+            incr: binop(var("x", scalar(ElemSize::I64)), BinOp::Add, int(1, Some(ElemSize::I64)), scalar(ElemSize::I64)),
+            body: vec![body],
+            unroll: false,
+            i: i()
+        };
+        let opts = CompileOptions::default();
+        eq_stmts(unroll_loops_stmt(vec![], s.clone(), &opts), vec![s]);
+    }
 }

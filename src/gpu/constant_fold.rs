@@ -1,7 +1,6 @@
 use super::ast::*;
 use crate::utils::constant_fold::*;
 use crate::utils::info::Info;
-use crate::utils::name::Name;
 use crate::utils::smap::*;
 
 impl CFExpr<Type> for Expr {
@@ -91,60 +90,6 @@ fn fold_expr(e: Expr) -> Expr {
         Expr::Struct {..} | Expr::ThreadIdx {..} | Expr::BlockIdx {..} => {
             e.smap(fold_expr)
         }
-    }
-}
-
-fn replace_dim_indices_with_zero(e: Expr) -> Expr {
-    match e {
-        Expr::ThreadIdx {ty, i, ..} => Expr::Int {v: 0, ty, i},
-        Expr::BlockIdx {ty, i, ..} => Expr::Int {v: 0, ty, i},
-        _ => e.smap(replace_dim_indices_with_zero)
-    }
-}
-
-fn is_zero_value(init: &Expr) -> bool {
-    let init = fold_expr(replace_dim_indices_with_zero(init.clone()));
-    match init {
-        Expr::Int {v, ..} if v == 0 => true,
-        _ => false
-    }
-}
-
-fn cond_upper_bound(var: &Name, cond: &Expr) -> Option<i128> {
-    match cond {
-        Expr::BinOp {lhs, op: BinOp::Lt, rhs, ..} => {
-            match (lhs.as_ref(), rhs.as_ref()) {
-                (Expr::Var {id, ..}, Expr::Int {v, ..}) if id == var => Some(*v),
-                _ => None
-            }
-        },
-        _ => None
-    }
-}
-
-fn incr_rhs(var: &Name, incr: &Expr) -> Option<i128> {
-    match incr {
-        Expr::BinOp {lhs, op: BinOp::Add, rhs, ..} => {
-            match (lhs.as_ref(), rhs.as_ref()) {
-                (Expr::Var {id, ..}, Expr::Int {v, ..}) if id == var => Some(*v),
-                _ => None
-            }
-        },
-        _ => None
-    }
-}
-
-// If every iteration of a for-loop runs on a distinct thread (with a unique thread and block
-// index) and each thread runs the for-loop exactly one iteration, we can eliminate the for-loop to
-// improve readability of the generated code.
-fn loop_runs_once(var: &Name, init: &Expr, cond: &Expr, incr: &Expr) -> bool {
-    if is_zero_value(init) {
-        match (cond_upper_bound(var, cond), incr_rhs(var, incr)) {
-            (Some(l), Some(r)) if l == r => true,
-            _ => false
-        }
-    } else {
-        false
     }
 }
 
@@ -289,100 +234,6 @@ mod test {
         assert_eq!(cf(e.clone()), e);
     }
 
-    #[test]
-    fn replace_thread_index_with_zero() {
-        let e = Expr::ThreadIdx {dim: Dim::X, ty: scalar(ElemSize::I64), i: i()};
-        assert_eq!(replace_dim_indices_with_zero(e), int(0, Some(ElemSize::I64)));
-    }
-
-    #[test]
-    fn replace_block_index_with_zero() {
-        let e = Expr::BlockIdx {dim: Dim::X, ty: scalar(ElemSize::I16), i: i()};
-        assert_eq!(replace_dim_indices_with_zero(e), int(0, Some(ElemSize::I16)));
-    }
-
-    #[test]
-    fn is_zero_value_zero_expr() {
-        assert!(is_zero_value(&int(0, None)));
-    }
-
-    #[test]
-    fn is_zero_value_thread_index() {
-        let e = Expr::ThreadIdx {dim: Dim::Y, ty: scalar(ElemSize::I64), i: i()};
-        assert!(is_zero_value(&e));
-    }
-
-    #[test]
-    fn is_zero_value_non_zero_int() {
-        assert!(!is_zero_value(&int(1, None)));
-    }
-
-    #[test]
-    fn cond_upper_bound_binop_lt() {
-        let cond = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Lt,
-            int(10, Some(ElemSize::I64)),
-            scalar(ElemSize::Bool)
-        );
-        assert_eq!(cond_upper_bound(&id("x"), &cond), Some(10));
-    }
-
-    #[test]
-    fn cond_upper_bound_wrong_binop_operands() {
-        let cond = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Gt,
-            var("y", scalar(ElemSize::I64)),
-            scalar(ElemSize::Bool)
-        );
-        assert_eq!(cond_upper_bound(&id("x"), &cond), None);
-    }
-
-    #[test]
-    fn cond_upper_bound_wrong_form() {
-        let cond = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Gt,
-            int(0, Some(ElemSize::I64)),
-            scalar(ElemSize::Bool)
-        );
-        assert_eq!(cond_upper_bound(&id("x"), &cond), None);
-    }
-
-    #[test]
-    fn incr_rhs_binop_add() {
-        let incr = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Add,
-            int(1, Some(ElemSize::I64)),
-            scalar(ElemSize::I64)
-        );
-        assert_eq!(incr_rhs(&id("x"), &incr), Some(1));
-    }
-
-    #[test]
-    fn incr_rhs_wrong_operands() {
-        let incr = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Add,
-            var("y", scalar(ElemSize::I64)),
-            scalar(ElemSize::I64)
-        );
-        assert_eq!(incr_rhs(&id("x"), &incr), None);
-    }
-
-    #[test]
-    fn incr_rhs_invalid_form() {
-        let incr = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Sub,
-            int(1, Some(ElemSize::I64)),
-            scalar(ElemSize::I64)
-        );
-        assert_eq!(incr_rhs(&id("x"), &incr), None);
-    }
-
     fn _loop() -> (Expr, Expr, Expr) {
         let init = int(0, None);
         let cond = binop(
@@ -398,36 +249,6 @@ mod test {
             scalar(ElemSize::I64)
         );
         (init, cond, incr)
-    }
-
-    #[test]
-    fn loop_runs_once_true() {
-        let (init, cond, incr) = _loop();
-        assert!(loop_runs_once(&id("x"), &init, &cond, &incr));
-    }
-
-    #[test]
-    fn loop_runs_once_non_matching_cond_and_incr() {
-        let init = int(0, None);
-        let cond = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Lt,
-            int(10, Some(ElemSize::I64)),
-            scalar(ElemSize::Bool)
-        );
-        let incr = binop(
-            var("x", scalar(ElemSize::I64)),
-            BinOp::Add,
-            int(1, Some(ElemSize::I64)),
-            scalar(ElemSize::I64)
-        );
-        assert!(!loop_runs_once(&id("x"), &init, &cond, &incr));
-    }
-
-    #[test]
-    fn loop_runs_once_non_zero_init() {
-        let init = int(1, None);
-        assert!(!loop_runs_once(&id("x"), &init, &init, &init));
     }
 
     #[test]
