@@ -75,6 +75,9 @@ pub fn specialize_ast_on_arguments<'py>(
     // the compiler.
     let main = shape_symbol_labels::add_implicit_labels(&opts, main);
 
+    let main = inline_const::inline_scalar_values_def(main, &args)?;
+    debug_env.print("Python-like AST after first inlining", &main);
+
     // Ensure the AST contains any degree of parallelism - otherwise, there is no point in using
     // this framework at all.
     par::ensure_parallelism(&main, &opts.parallelize)?;

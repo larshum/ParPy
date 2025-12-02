@@ -307,7 +307,11 @@ fn to_ir_expr(
         },
         py_ast::Expr::StaticFail {i, ..} => {
             parpy_internal_error!(i, "Found StaticFail expression node in IR translation")
-        }
+        },
+        py_ast::Expr::AllocShared {i, ..} => {
+            parpy_compile_error!(i, "The alloc_shared builtin must be used as \
+                                     the right-hand side of an assignment")
+        },
     }
 }
 
@@ -353,6 +357,20 @@ fn to_ir_stmt(
     stmt: py_ast::Stmt
 ) -> CompileResult<Stmt> {
     match stmt {
+        py_ast::Stmt::Definition {
+            id, expr: py_ast::Expr::AllocShared {shape, sz, ..}, i, ..
+        } => {
+            let elem_ty = Type::Tensor {sz: to_ir_elem_size(sz, &i)?, shape: vec![]};
+            let size = shape.into_iter()
+                .map(|e| match e {
+                    py_ast::Expr::Int {v, ..} => Ok(v as usize),
+                    _ => parpy_internal_error!(i, "Found statically unresolved dimension")
+                })
+                .collect::<CompileResult<Vec<usize>>>()?
+                .into_iter()
+                .product::<usize>();
+            Ok(Stmt::AllocShared {id, elem_ty, sz: size, i})
+        },
         py_ast::Stmt::Definition {ty, id, expr, i, ..} => {
             let ty = to_ir_type(env, &i, ty)?;
             let expr = to_ir_expr(env, expr)?;

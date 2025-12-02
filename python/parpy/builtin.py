@@ -31,3 +31,9 @@ def static_types_eq(l, r):
 
 def static_fail(s):
     raise RuntimeError(s)
+
+def alloc_shared(shape, dtype):
+    pass
+
+def sync():
+    pass
