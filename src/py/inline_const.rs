@@ -141,7 +141,6 @@ pub fn inline_scalar_values_def<'py>(
     args: &Vec<Bound<'py, PyAny>>
 ) -> PyResult<FunDef> {
     let const_map = make_const_map(args, &def.params)?;
-    println!("{:#?}", const_map);
     replace_constants_def(&const_map, def)
 }
 
